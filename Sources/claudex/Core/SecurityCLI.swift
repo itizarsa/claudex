@@ -73,11 +73,9 @@ enum KeychainItem {
     /// reassembled from a manifest item. Observed by other tools at roughly 2 KB.
     private static let chunkLength = 2_048
     private static let maximumChunks = 64
-    static let manifestPrefix = "claudex-chunks:"
+    private static let manifestPrefix = "claudex-chunks:"
 
-    /// `manifestPrefix` is a parameter because the same base64-plus-chunks layout is used by
-    /// other tools under their own marker, and importing from one means reading its items.
-    static func read(service: String, account: String, manifestPrefix: String = manifestPrefix) throws -> String? {
+    static func read(service: String, account: String) throws -> String? {
         guard let stored = try readRawBase64(service: service, account: account) else { return nil }
         guard let decoded = decodeBase64(stored) else {
             throw ClaudexError.decoding("Keychain item \(account) is not base64")

@@ -118,24 +118,6 @@ enum Probe {
         store.cacheSnapshots()
     }
 
-    /// Adopts every account tokenmaxx holds. Prints one line per account either way: an import
-    /// that silently skips half its input is worse than one that fails.
-    @MainActor
-    static func importTokenmaxx() async {
-        let store = AccountStore()
-        let outcome = await TokenmaxxImport.importAll(into: store)
-
-        for account in outcome.imported {
-            print("imported \(account.provider.rawValue) / \(account.label)  [\(account.identity.plan)]")
-        }
-        for skip in outcome.skipped {
-            print("skipped \(skip.label): \(skip.reason)")
-        }
-        if outcome.imported.isEmpty && outcome.skipped.isEmpty {
-            print("tokenmaxx holds no importable accounts")
-        }
-    }
-
     @MainActor
     static func list() {
         let store = AccountStore()
