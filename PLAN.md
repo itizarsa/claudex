@@ -131,10 +131,7 @@ endpoints still return the shape this app expects.
           ClaudeProvider.swift
           CodexProvider.swift
         Auth/
-          PKCE.swift
-          LoopbackServer.swift    # NWListener, one-shot callback
-          ClaudeAuth.swift
-          CodexAuth.swift
+          SandboxedLogin.swift    # spawn the CLI's own login into a throwaway config dir
           CLIImport.swift         # adopt whatever the CLI is signed into now
 
 Provider protocol, one seam per CLI:
@@ -160,9 +157,9 @@ State:
     ~/Library/Application Support/claudex/snapshots.json  # last known usage, for launch
     ~/Library/Application Support/claudex/vault.json      # tokens, mode 0600
 
-### Why the tokens are not in the Keychain
+### Why the Keychain is reached through a subprocess
 
-This was the plan, and it does not work for a locally built app.
+The in-process route does not work for a locally built app, and the workaround is a subprocess.
 
 macOS binds a Keychain item's access control to the calling binary's code signature. An
 ad-hoc signed build gets a new signature every time it is rebuilt, so the system treats each
@@ -171,16 +168,24 @@ CLI invocation cannot answer that prompt, and `SecItemCopyMatching` simply never
 This was observed directly: the process parked in `mach_msg` inside
 `ClientSession::decrypt`, waiting on `securityd`, indefinitely.
 
-The same applies to reading Claude Code's own `Claude Code-credentials` item from claudex.
-So `ClaudeProvider` reads `~/.claude/.credentials.json` first and only falls back to the
-Keychain if the file is missing. The two stores hold identical bytes, so nothing is lost.
+`/usr/bin/security` is Apple-signed with a stable identity, so spawning it performs the same
+operations unprompted. Verified on 2026-09-12: reading Claude Code's own
+`Claude Code-credentials` item, and creating, reading and deleting claudex's own items, all
+returned exit 0 immediately. `SecurityCLI` wraps the subprocess and `KeychainItem` layers
+generic-password access on top; no `SecItem` call remains in the app.
 
-Tokens therefore live in `vault.json` at mode 0600 inside the app container. The exposure is
-unchanged from what already exists on the machine: Claude Code keeps its tokens in
-`~/.claude/.credentials.json` and Codex in `~/.codex/auth.json`, both 0600, both readable by
-any process running as this user. The file vault adds no new class of reader, but it is a
-genuine downgrade from the Keychain and should be reversed once the app is signed with a
-stable identity. `Settings.useKeychain` switches back with no other change.
+Two constraints come with that route. `security` prints a payload as hex when it is not UTF-8,
+and it truncates large generic-password values, so claudex stores its own values base64-encoded
+and splits anything over 2 KB across numbered chunk items behind a manifest. Secrets go in on
+stdin via `security -i`, never in the argument vector, which `ps` can read; the one exception is
+Claude Code's own item, whose exact JSON bytes cannot survive that parser, and which is
+documented in `ClaudeCLIKeychain.writeRaw`.
+
+Tokens therefore live in the Keychain. `Settings.allowKeychain` is on by default and switching
+it off falls back to `vault.json` at mode 0600 inside the app container, which is where they
+lived before. Accounts written under the old default migrate on first read: `Vault.load` moves a
+file entry into the Keychain and deletes it from the file. `--vault` covers both the round trip
+and the migration.
 
 There is exactly one active account per provider, so a Claude switch never disturbs Codex.
 
@@ -243,19 +248,17 @@ Two paths, both needed.
 now, fetches identity, and stores it as a new account. Cheap, no OAuth code, and it is how
 existing accounts get adopted on first run.
 
-`Sign in` runs the CLI's own public-client PKCE flow against a loopback redirect, so an
-account can be added without disturbing the currently active one:
+`Sign in` runs the CLI's own login against a throwaway config directory, so an account can be
+added without disturbing the currently active one:
 
-- Claude: authorize at `https://claude.ai/oauth/authorize`, exchange at
-  `https://platform.claude.com/v1/oauth/token`, client id
-  `9d1c250a-e61b-44d9-88ed-5944d1962f5e`.
-- Codex: authorize at `https://auth.openai.com/oauth/authorize`, exchange at
-  `https://auth.openai.com/oauth/token`, client id `app_EMoamEEZ73f0CkXaXp7hrann`,
-  redirect `http://localhost:1455/auth/callback`.
+- Claude: `claude auth login --claudeai` with `CLAUDE_CONFIG_DIR` set to a temp directory, then
+  read `.credentials.json` from it. Claude Code derives its Keychain service name from that
+  directory, appending a hash of the canonical path, so the sandboxed login gets its own item.
+- Codex: the equivalent with `CODEX_HOME`, then read `auth.json` from it.
 
-Both flows verify the `state` parameter and bind the code verifier to a single one-shot
-listener. Client ids and endpoints live in one constants file, since they are the pieces
-most likely to change under the app's feet.
+Both paths delete the temp directory and its Keychain item once the credential is in the vault.
+The refresh endpoints and client ids still live in one constants file for the refresh path, since
+they are the pieces most likely to change under the app's feet.
 
 Gating on add: a Claude account is rejected unless the profile reports a claude.ai
 subscription (`has_claude_pro`, `has_claude_max`, or a team seat tier); an `sk-ant-api`
@@ -277,16 +280,27 @@ and a backup of the file it replaces; what remains is wiring it to a manual swit
 popover and verifying it. Verify by switching, starting a fresh `claude` and `codex`, and
 confirming each reports the expected identity.
 
-Open question to settle first by experiment, not by guessing: whether writing
-`~/.claude/.credentials.json` alone is enough for Claude Code, or whether the Keychain item
-must be updated too. Updating it means a prompt, for the same code-signature reason above.
-If the file alone suffices, the Keychain write can be dropped from `activate` entirely.
+The question of whether the file alone suffices is settled: it does not. Both stores must be
+written. Claude Usage Tracker writes the Keychain item, `.credentials.json` and the
+`oauthAccount` block on every switch, and records why — the CLI reads the file first, so a stale
+file shadows a freshly written Keychain item. CCSwitcher writes the Keychain item and treats it
+as authoritative. Since `security` removes the prompt that made the Keychain write costly, the
+write stays in `activate` and the two are kept in step.
+
+One case remains untested: updating an item another application owns. claudex can read Claude
+Code's item and can create and update its own, but the first write to `Claude Code-credentials`
+may still prompt. Test it with a `.credentials.json` backup in hand, because a half-applied
+switch is what logs the CLI out.
 
 Phase 3 — automation. Rotator, thresholds in settings, cooldown, notifications, launch at
 login via `SMAppService`.
 
-Phase 4 — in-app sign-in. PKCE flows for both providers, so accounts can be added without
-touching the CLI.
+Phase 4 — in-app sign-in. Spawn the CLI's own login against a throwaway config directory
+(`CLAUDE_CONFIG_DIR` for Claude, `CODEX_HOME` for Codex), import the credential it writes there,
+then delete the directory and its Keychain item. The active account is never disturbed and
+claudex owns no OAuth code. tokenmaxx does exactly this, which is worth more than the PKCE
+flows originally planned here: no loopback listener, no code verifier, and no client ids to
+keep current. `PKCE.swift` and `LoopbackServer.swift` drop out of the architecture.
 
 Phase 5 — packaging. `xcodebuild` release, ad-hoc signature, a `make install` that drops
 the bundle in `/Applications`. Sparkle is deliberately left out until there is a second
@@ -308,20 +322,21 @@ That settles who owns what:
   here and stored in the vault, with no CLI contact at all.
 
 An earlier design had claudex refresh the active account and mirror the result back into the
-CLI's store. That does not work, because Claude Code keeps a second copy in a Keychain item
-and writing another application's Keychain item raises an authorisation prompt. Phase 1 now
+CLI's store, and was dropped when writing another application's Keychain item looked impossible.
+The subprocess route may well make it work, but the ownership rule above stands on its own: two
+processes refreshing the same rotating refresh token race, whatever the mechanism. Phase 1
 performs no writes outside its own container.
 
-## No Keychain calls
+## One switch for every Keychain call
 
-`Settings.allowKeychain` is off by default and gates every SecItem call in the app —
-claudex's own vault items and Claude Code's `Claude Code-credentials` item alike. `Vault`
-routes around the Keychain when it is off, and `KeychainVault` and `ClaudeCLIKeychain` each
-re-check the flag before touching the Security framework, so no future call site can
-reintroduce a prompt by accident.
+`Settings.allowKeychain` gates every Keychain call in the app — claudex's own vault items and
+Claude Code's `Claude Code-credentials` item alike. It is on by default. `Vault` routes to the
+file store when it is off, and `KeychainVault` and `ClaudeCLIKeychain` each re-check the flag
+before spawning `security`, so a single setting still decides the behaviour of every call site.
 
-Turn it on only once the app is signed with a stable identity, at which point the vault
-moves back to the Keychain and `activate` can update both of Claude Code's stores together.
+Every invocation is bounded by an 8-second timeout. `security` itself has been observed to hang
+indefinitely on some macOS builds, and a Keychain call that stalls a poll is worse than one that
+fails: the timeout turns the former into the latter.
 
 ## Risks
 
