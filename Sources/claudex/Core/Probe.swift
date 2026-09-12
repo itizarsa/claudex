@@ -61,6 +61,23 @@ enum Probe {
         } catch {
             print("vault: FAILED \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
         }
+
+        guard Vault.useKeychain else { return }
+        // The migration path only runs for accounts stored before the Keychain became usable,
+        // which no live account may still be in. Exercise it here rather than leave it to be
+        // discovered by the one account that needs it.
+        let migrationID = UUID()
+        do {
+            try FileVault.store(sample, for: migrationID)
+            let loaded = try Vault.load(migrationID)
+            let movedOut = try FileVault.load(migrationID) == nil
+            let movedIn = try KeychainVault.load(migrationID) == sample
+            try Vault.delete(migrationID)
+            let verdict = loaded == sample && movedOut && movedIn
+            print("vault migration: \(verdict ? "ok" : "file entry not moved to Keychain")")
+        } catch {
+            print("vault migration: FAILED \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
+        }
     }
 
     /// One poll cycle against the stored accounts, printing each step. Unlike `--probe` this

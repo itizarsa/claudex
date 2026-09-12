@@ -2,21 +2,17 @@ import Foundation
 
 /// Where refresh tokens live.
 ///
-/// The Keychain is the better store in principle, but it binds an item's access control to
-/// the calling binary's code signature. A locally built, ad-hoc signed app gets a new
-/// signature on every rebuild, so macOS treats each build as a different application and
-/// blocks on an authorisation prompt — which a background poll or a CLI invocation can never
-/// answer. Until claudex is signed with a stable identity, the default store is a 0600 file
-/// inside the app's own container.
+/// The Keychain, reached through `/usr/bin/security` rather than the Security framework. The
+/// framework route is unusable from a locally built app: it binds an item's access control to
+/// the calling binary's code signature, an ad-hoc signed build gets a new signature on every
+/// rebuild, so macOS treats each build as a different application and blocks on an authorisation
+/// prompt that a background poll can never answer. `/usr/bin/security` is Apple-signed with a
+/// stable identity and completes the same operations unprompted. See `SecurityCLI`.
 ///
-/// The exposure is the same as what already exists on the machine: Claude Code keeps its
-/// tokens in `~/.claude/.credentials.json` and Codex in `~/.codex/auth.json`, both 0600 and
-/// both readable by any process running as this user. The file vault adds no new class of
-/// reader. It is still a real downgrade from the Keychain, which is why `Settings.useKeychain`
-/// exists for anyone signing the app properly.
+/// `Settings.allowKeychain` switches the whole app back to a 0600 file in its own container,
+/// which is where tokens lived before the subprocess route was found.
 enum Vault {
-    /// Read once at startup. Every Keychain entry point in the app checks this, so a single
-    /// flag guarantees no code path can raise an authorisation prompt.
+    /// Read once at startup, so a single flag decides the store for every call site.
     static var useKeychain: Bool = Settings.load().allowKeychain
 
     static func store(_ credentials: Credentials, for id: UUID) throws {
@@ -27,19 +23,24 @@ enum Vault {
         }
     }
 
+    /// Reads fall back to the file store and migrate what they find: accounts stored before the
+    /// Keychain became usable would otherwise read as signed out.
     static func load(_ id: UUID) throws -> Credentials? {
-        if useKeychain {
-            return try KeychainVault.load(id)
-        }
-        return try FileVault.load(id)
+        guard useKeychain else { return try FileVault.load(id) }
+        if let stored = try KeychainVault.load(id) { return stored }
+        guard let migrated = try FileVault.load(id) else { return nil }
+        try KeychainVault.store(migrated, for: id)
+        try FileVault.delete(id)
+        return migrated
     }
 
+    /// Clears both stores whichever is active: a half-migrated account must not leave a live
+    /// token behind in the one currently switched off.
     static func delete(_ id: UUID) throws {
         if useKeychain {
             try KeychainVault.delete(id)
-        } else {
-            try FileVault.delete(id)
         }
+        try FileVault.delete(id)
     }
 }
 

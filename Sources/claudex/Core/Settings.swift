@@ -15,11 +15,11 @@ struct Settings: Codable, Equatable, Sendable {
     var showLabelInMenuBar: Bool
     /// Menu bar percentage follows this provider. The popover always shows both.
     var menuBarProvider: ProviderKind
-    /// Master switch for every Keychain call in the app, default off. An ad-hoc signed build
-    /// gets a new code signature on each rebuild, so macOS treats it as a new application and
-    /// blocks on an authorisation prompt that a background poll cannot answer. Turn this on
-    /// only once the app is signed with a stable identity. See `Vault`.
-    var allowKeychain: Bool = false
+    /// Master switch for every Keychain call in the app. On, because claudex reaches the
+    /// Keychain through `/usr/bin/security`, which is Apple-signed and so raises none of the
+    /// authorisation prompts that in-process `SecItem` calls do from an ad-hoc signed build.
+    /// Off falls back to a 0600 file in the app's container. See `Vault`.
+    var allowKeychain: Bool = true
 
     static let `default` = Settings(
         thresholds: [.claude: .default, .codex: .default],
@@ -28,7 +28,7 @@ struct Settings: Codable, Equatable, Sendable {
         autoSwitchEnabled: false,
         showLabelInMenuBar: false,
         menuBarProvider: .claude,
-        allowKeychain: false
+        allowKeychain: true
     )
 
     func thresholds(for kind: ProviderKind) -> ProviderThresholds {
