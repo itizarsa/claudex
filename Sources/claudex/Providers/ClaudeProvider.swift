@@ -218,7 +218,12 @@ struct ClaudeProvider: Provider {
         var oauthAccount = root["oauthAccount"] as? [String: Any] ?? [:]
         oauthAccount["emailAddress"] = identity.email
         oauthAccount["accountUuid"] = identity.remoteID
-        if let name = identity.displayName { oauthAccount["displayName"] = name }
+        // Both name fields, or the CLI shows the incoming account's email beside the outgoing
+        // account's name.
+        if let name = identity.displayName {
+            oauthAccount["displayName"] = name
+            oauthAccount["fullName"] = name
+        }
         if let organization = identity.organization { oauthAccount["organizationName"] = organization }
         root["oauthAccount"] = oauthAccount
 

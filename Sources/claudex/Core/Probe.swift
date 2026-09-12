@@ -118,6 +118,30 @@ enum Probe {
         store.cacheSnapshots()
     }
 
+    /// Headless switch, by label. The one path that writes to a CLI's own storage, so it reports
+    /// what the CLI reads back afterwards rather than only that the write returned.
+    @MainActor
+    static func switchTo(_ label: String) async {
+        let store = AccountStore()
+        guard let account = store.accounts.first(where: { $0.label == label }) else {
+            print("no account labelled \(label)")
+            return
+        }
+        do {
+            guard try await Switcher.activate(account, in: store) else {
+                print("\(account.label) is already active")
+                return
+            }
+            let provider = Providers.of(account.provider)
+            let live = try provider.readCurrentCLICredentials()
+            let matches = live?.refreshFingerprint == (try store.credentials(for: account))?.refreshFingerprint
+            print("switched \(account.provider.rawValue) to \(account.label)")
+            print("  CLI reads back: \(matches ? "same credentials" : "MISMATCH")")
+        } catch {
+            print("switch failed: \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
+        }
+    }
+
     @MainActor
     static func list() {
         let store = AccountStore()

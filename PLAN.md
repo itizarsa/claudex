@@ -275,10 +275,12 @@ Verified end to end against live accounts: both CLIs imported, both usage endpoi
 the menu bar app polling on its timer and writing snapshots. The one write outside the
 container that Phase 1 does perform is the refresh mirror described below.
 
-Phase 2 — switching. `activate` is already written for both providers, with atomic writes
-and a backup of the file it replaces; what remains is wiring it to a manual switch in the
-popover and verifying it. Verify by switching, starting a fresh `claude` and `codex`, and
-confirming each reports the expected identity.
+Phase 2 — switching. `Switcher.activate` drives it and `--switch <label>` exercises it
+headlessly; what remains is wiring the same call to a manual switch in the popover. The order
+inside `Switcher` carries the correctness, because refresh tokens rotate and the last write
+wins: harvest the outgoing account's live CLI tokens into its vault entry, persist the incoming
+account's refreshed tokens before handing them over, then record the change. Skipping the
+harvest silently invalidates whichever account is switched away from.
 
 The question of whether the file alone suffices is settled: it does not. Both stores must be
 written. Claude Usage Tracker writes the Keychain item, `.credentials.json` and the
@@ -287,10 +289,10 @@ file shadows a freshly written Keychain item. CCSwitcher writes the Keychain ite
 as authoritative. Since `security` removes the prompt that made the Keychain write costly, the
 write stays in `activate` and the two are kept in step.
 
-One case remains untested: updating an item another application owns. claudex can read Claude
-Code's item and can create and update its own, but the first write to `Claude Code-credentials`
-may still prompt. Test it with a `.credentials.json` backup in hand, because a half-applied
-switch is what logs the CLI out.
+Writing an item another application owns turned out to cost nothing either. Verified on
+2026-09-12 by switching the Claude CLI between two live accounts: `Claude Code-credentials` was
+updated through `security` with no authorisation prompt, and a subsequent read returned the new
+credentials. Nothing about the Keychain now distinguishes claudex's own items from a CLI's.
 
 Phase 3 — automation. Rotator, thresholds in settings, cooldown, notifications, launch at
 login via `SMAppService`.
@@ -323,9 +325,15 @@ That settles who owns what:
 
 An earlier design had claudex refresh the active account and mirror the result back into the
 CLI's store, and was dropped when writing another application's Keychain item looked impossible.
-The subprocess route may well make it work, but the ownership rule above stands on its own: two
-processes refreshing the same rotating refresh token race, whatever the mechanism. Phase 1
-performs no writes outside its own container.
+That obstacle is gone, but the ownership rule above stands on its own: two processes refreshing
+the same rotating refresh token race, whatever the mechanism. Phase 1 performs no writes outside
+its own container.
+
+A switch is the one moment the rule hands over, and the handover is why `Switcher` harvests
+before it overwrites. Between claudex's last look and the switch, the CLI has been refreshing
+the outgoing account's token; that newer copy exists only in the CLI's store and is about to be
+replaced. Reading it back into the vault first is what makes the account still usable when it is
+switched to again.
 
 ## One switch for every Keychain call
 
