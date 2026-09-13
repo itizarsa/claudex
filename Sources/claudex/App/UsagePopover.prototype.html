@@ -3,253 +3,260 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Claudex popover prototype</title>
-  <!-- Throwaway prototype: three UsagePopover directions, switchable via ?variant=. -->
+  <title>Claudex reset placement prototype</title>
+  <!-- Throwaway prototype: three reset placements inside real-width account cards, switchable via ?variant=. -->
   <style>
     :root {
       color-scheme: dark;
-      --page: #0d0e10;
-      --panel: #17181b;
-      --raised: #202126;
-      --line: #303139;
-      --text: #f0f0f2;
-      --muted: #92939b;
-      --faint: #62636c;
-      --green: #65cf91;
-      --red: #e07871;
-      --amber: #d7a257;
-      --radius: 12px;
+      --page: #0b0c0e;
+      --panel: #1b1c1f;
+      --line: rgba(255, 255, 255, .10);
+      --hover: rgba(255, 255, 255, .05);
+      --text: #f2f2f4;
+      --muted: rgba(242, 242, 244, .62);
+      --faint: rgba(242, 242, 244, .43);
+      --track: rgba(255, 255, 255, .13);
+      --accent: #4b94ef;
+      --green: #45cd72;
       font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
     }
+
     * { box-sizing: border-box; }
+
     body {
       margin: 0;
       min-height: 100dvh;
       display: grid;
       place-items: center;
-      padding: 32px 16px 96px;
-      background: #090a0c;
+      padding: 28px 16px 104px;
+      background: var(--page);
       color: var(--text);
     }
+
     button { font: inherit; }
+
+    .stage { transform: scale(1.6); transform-origin: center; }
     .popover {
-      width: min(400px, 100%);
-      min-height: 590px;
-      overflow: hidden;
-      border: 1px solid #292a30;
-      border-radius: 18px;
+      width: 280px;
+      padding: 12px;
+      border: .5px solid var(--line);
+      border-radius: 12px;
       background: var(--panel);
-      box-shadow: 0 26px 80px rgba(0, 0, 0, .5);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .55);
     }
-    .variant { display: none; min-height: 590px; }
-    .variant.active { display: flex; flex-direction: column; }
-    .provider-mark {
-      width: 28px;
-      height: 28px;
-      display: grid;
-      place-items: center;
-      border-radius: 7px;
-      background: #34353b;
-      color: #d7d8dc;
-      font-size: 13px;
-      font-weight: 700;
+
+    .provider {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin: 0 2px 7px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 650;
+      letter-spacing: .06em;
     }
-    .provider-mark.codex { background: #d7d8dc; color: #202126; }
-    .muted { color: var(--muted); }
-    .faint { color: var(--faint); }
-    .green { color: var(--green); }
-    .red { color: var(--red); }
-    .mono { font-variant-numeric: tabular-nums; }
-    .grow { flex: 1; }
-    .icon-button {
-      width: 28px;
-      height: 28px;
+
+    .provider button {
+      margin-left: auto;
+      width: 24px;
+      height: 24px;
       border: 0;
-      border-radius: 8px;
+      border-radius: 6px;
       background: transparent;
       color: var(--muted);
       cursor: pointer;
     }
-    .icon-button:hover { background: var(--raised); color: var(--text); }
-    .footer {
-      display: flex;
+
+    .card {
+      position: relative;
+      overflow: hidden;
+      padding: 8px 10px;
+      border: .5px solid var(--line);
+      border-radius: 8px;
+    }
+
+    .card::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 2px;
+      background: var(--accent);
+    }
+
+    .account { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
+    .badge {
+      width: 24px;
+      height: 24px;
+      display: grid;
+      place-items: center;
+      flex: none;
+      border-radius: 50%;
+      background: rgba(75, 148, 239, .15);
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 750;
+    }
+
+    .identity { min-width: 0; }
+    .name { font-size: 11px; font-weight: 650; }
+    .sub { color: var(--faint); font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .variant { display: none; }
+    .variant.active { display: grid; gap: 9px; }
+    .usage { display: grid; gap: 5px; }
+    .usage-head { min-width: 0; }
+    .label { color: var(--text); font-size: 13px; font-weight: 520; white-space: nowrap; }
+    .secondary .label { color: var(--muted); }
+    .reset { color: var(--muted); font-size: 9px; white-space: nowrap; }
+    .percent {
+      justify-self: end;
+      color: var(--green);
+      font-size: 13px;
+      font-weight: 650;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .track { height: 3px; overflow: hidden; border-radius: 2px; background: var(--track); }
+    .track i { display: block; width: var(--value); height: 100%; background: var(--green); }
+
+    /* A: one baseline. Reset reads as quiet metadata belonging to label. */
+    .a .usage-head {
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: baseline;
+      gap: 7px;
+    }
+
+    /* B: reset gets its own aligned metadata column. Better scanning, more visual machinery. */
+    .b .usage-head {
+      display: grid;
+      grid-template-columns: 53px 1fr auto;
       align-items: center;
-      gap: 14px;
-      min-height: 52px;
-      padding: 0 20px;
-      border-top: 1px solid var(--line);
+      gap: 7px;
+    }
+
+    .b .reset-block {
+      display: grid;
+      grid-template-columns: auto 1fr;
+      align-items: baseline;
+      gap: 4px;
+      min-width: 0;
+    }
+
+    .b .reset-key {
+      color: var(--faint);
+      font-size: 7px;
+      font-weight: 650;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+    }
+
+    /* C: reset becomes a compact fact chip directly attached to label. */
+    .c .usage-head { display: flex; align-items: baseline; gap: 6px; }
+    .c .reset-chip {
+      overflow: hidden;
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, .07);
       color: var(--muted);
-      font-size: 12px;
+      font-size: 8px;
+      white-space: nowrap;
+      text-overflow: ellipsis;
     }
-    .footer button { border: 0; padding: 0; background: none; color: inherit; cursor: pointer; }
-    .footer button:hover { color: var(--text); }
-    .meter { height: 7px; overflow: hidden; border-radius: 4px; background: #34353b; }
-    .meter > i { display: block; width: 52%; height: 100%; background: var(--green); }
-    .meter.empty > i { width: 2px; background: #c9cad0; }
-
-    /* A: ledger. Information aligns in one compact reading path. */
-    .a-head {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      align-items: center;
-      padding: 18px 20px 12px;
-    }
-    .a-head h2 { margin: 0; font-size: 15px; font-weight: 650; }
-    .ledger { padding: 0 14px; }
-    .ledger-row { padding: 16px 6px 18px; border-top: 1px solid var(--line); }
-    .account-line { display: flex; align-items: center; gap: 9px; }
-    .account-line strong { font-size: 15px; }
-    .account-line small { font-size: 12px; }
-    .usage-line {
-      display: grid;
-      grid-template-columns: 54px 1fr 40px;
-      align-items: center;
-      gap: 8px;
-      margin-top: 14px;
-      font-size: 12px;
-    }
-    .reset { margin: 6px 0 0 62px; font-size: 11px; color: var(--muted); }
-    .inline-error {
-      display: flex;
-      gap: 10px;
-      margin-top: 11px;
-      padding: 10px;
-      border-radius: var(--radius);
-      background: rgba(224, 120, 113, .08);
-      color: #d9a09c;
-      font-size: 12px;
-      line-height: 1.35;
-    }
-    .inline-error b { color: var(--red); font-weight: 650; }
-
-    /* B: split glance. Active account dominates; problems become secondary rail. */
-    .b-top { display: flex; align-items: center; gap: 10px; padding: 16px; }
-    .b-top strong { font-size: 13px; }
-    .hero-usage { padding: 18px 16px 22px; }
-    .hero-label { color: var(--muted); font-size: 11px; }
-    .hero-number { margin: 3px 0 13px; font-size: 52px; font-weight: 620; letter-spacing: -3px; }
-    .hero-number span { font-size: 20px; letter-spacing: -1px; }
-    .hero-reset { margin-top: 8px; color: var(--muted); font-size: 11px; }
-    .weekly-block {
-      display: grid;
-      grid-template-columns: 1fr auto;
-      gap: 10px;
-      padding: 14px 16px;
-      border-top: 1px solid var(--line);
-      border-bottom: 1px solid var(--line);
-    }
-    .weekly-block .meter { grid-column: 1 / -1; }
-    .provider-alert { margin: 14px 16px; padding: 13px; border-radius: var(--radius); background: var(--raised); }
-    .provider-alert header { display: flex; align-items: center; gap: 9px; font-size: 12px; }
-    .provider-alert p { margin: 10px 0 0 33px; color: var(--muted); font-size: 11px; line-height: 1.4; }
-    .retry { margin-left: 33px; margin-top: 10px; border: 0; padding: 0; background: none; color: #dedee2; font-size: 11px; cursor: pointer; }
-
-    /* C: provider columns. Comparison and status lead. */
-    .c-title { padding: 17px 16px 13px; font-size: 15px; font-weight: 650; }
-    .columns { display: grid; grid-template-columns: 1fr 1fr; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
-    .column { min-height: 398px; padding: 15px; }
-    .column + .column { border-left: 1px solid var(--line); }
-    .column-head { display: flex; align-items: center; justify-content: space-between; }
-    .column-head span { font-size: 11px; color: var(--muted); }
-    .column h3 { margin: 22px 0 3px; font-size: 12px; }
-    .column .plan { color: var(--faint); font-size: 10px; }
-    .stat { margin-top: 24px; }
-    .stat-label { font-size: 10px; color: var(--muted); }
-    .stat-value { margin: 4px 0 7px; font-size: 25px; font-weight: 620; letter-spacing: -1px; }
-    .column-error { margin-top: 26px; color: #d9a09c; font-size: 11px; line-height: 1.45; }
-    .column-error b { display: block; margin-bottom: 5px; color: var(--red); }
+    .c .percent { margin-left: auto; }
 
     .switcher {
       position: fixed;
       left: 50%;
-      bottom: 22px;
+      bottom: 18px;
       transform: translateX(-50%);
       display: flex;
       align-items: center;
-      gap: 8px;
+      gap: 6px;
       padding: 6px;
-      border: 1px solid #464851;
-      border-radius: 13px;
-      background: #f0f0f2;
-      color: #16171a;
+      border: 1px solid rgba(255, 255, 255, .15);
+      border-radius: 999px;
+      background: rgba(27, 28, 31, .96);
       box-shadow: 0 12px 36px rgba(0, 0, 0, .45);
-      z-index: 10;
     }
-    .switcher button { width: 30px; height: 28px; border: 0; border-radius: 8px; background: #d9d9de; color: #16171a; cursor: pointer; }
+
+    .switcher button {
+      width: 30px;
+      height: 28px;
+      border: 0;
+      border-radius: 999px;
+      background: var(--hover);
+      color: var(--text);
+      cursor: pointer;
+    }
     .switcher button:active { transform: scale(.96); }
-    .variant-name { min-width: 150px; text-align: center; font-size: 12px; font-weight: 650; }
+    .variant-name { min-width: 136px; text-align: center; color: var(--muted); font-size: 11px; font-weight: 600; }
+
     .state {
       position: fixed;
-      right: 14px;
       top: 14px;
-      width: 210px;
-      padding: 10px 12px;
-      border: 1px solid #303139;
-      border-radius: 10px;
+      right: 14px;
+      width: 190px;
+      padding: 9px 11px;
+      border: 1px solid var(--line);
+      border-radius: 9px;
       background: #131417;
-      color: #85868e;
-      font: 10px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+      color: var(--faint);
+      font: 10px/1.45 ui-monospace, SFMono-Regular, Menlo, monospace;
       white-space: pre-wrap;
     }
-    @media (max-width: 720px) { .state { display: none; } }
+
+    @media (max-width: 760px) {
+      .stage { transform: scale(1.25); }
+      .state { display: none; }
+    }
   </style>
 </head>
 <body>
-  <main class="popover" aria-label="Claudex menu prototype">
-    <section class="variant" data-variant="A">
-      <div class="a-head"><h2>Claude</h2><button class="icon-button" aria-label="Add Claude account">+</button></div>
-      <div class="ledger">
-        <div class="ledger-row">
-          <div class="account-line"><span class="provider-mark">A</span><strong>arshath</strong><small class="muted">Pro</small></div>
-          <div class="inline-error"><b>429</b><span>Rate limited. Claude will retry automatically.</span></div>
-        </div>
-      </div>
-      <div class="a-head"><h2>Codex</h2><button class="icon-button" aria-label="Add Codex account">+</button></div>
-      <div class="ledger grow">
-        <div class="ledger-row">
-          <div class="account-line"><span class="provider-mark codex">A</span><strong>arshath</strong><small class="muted">Plus</small></div>
-          <div class="usage-line"><span class="muted">Session</span><div class="meter empty"><i></i></div><b class="mono">0%</b></div>
-          <div class="reset">Resets today at 10:59 PM</div>
-          <div class="usage-line"><span class="muted">Weekly</span><div class="meter"><i></i></div><b class="mono green">52%</b></div>
-          <div class="reset">Resets Sep 15 at 6:19 PM</div>
-        </div>
-      </div>
-      <footer class="footer"><button>Refresh</button><span class="grow"></span><button>Quit</button></footer>
-    </section>
+  <main class="stage">
+    <section class="popover" aria-label="Claudex account card reset prototype">
+      <header class="provider"><span>CODEX</span><button aria-label="Add Codex account">+</button></header>
+      <article class="card">
+        <header class="account">
+          <div class="badge">AR</div>
+          <div class="identity">
+            <div class="name">Arshath</div>
+            <div class="sub">Plus · arshath@example.com</div>
+          </div>
+        </header>
 
-    <section class="variant" data-variant="B">
-      <header class="b-top"><span class="provider-mark codex">A</span><strong>arshath</strong><span class="muted">Codex Plus</span><span class="grow"></span><button class="icon-button" aria-label="Add account">+</button></header>
-      <div class="hero-usage">
-        <div class="hero-label">Session usage</div>
-        <div class="hero-number mono green">0<span>%</span></div>
-        <div class="meter empty"><i></i></div>
-        <div class="hero-reset">Available until 10:59 PM today</div>
-      </div>
-      <div class="weekly-block"><span class="muted">Weekly usage</span><strong class="mono green">52%</strong><div class="meter"><i></i></div></div>
-      <div class="provider-alert grow">
-        <header><span class="provider-mark">A</span><strong>Claude unavailable</strong></header>
-        <p>Rate limited. Last check failed, existing credentials remain active.</p>
-        <button class="retry">Retry Claude</button>
-      </div>
-      <footer class="footer"><button>All accounts</button><span class="grow"></span><button>Quit</button></footer>
-    </section>
+        <div class="variant a" data-variant="A">
+          <div class="usage">
+            <div class="usage-head"><span class="label">Session</span><span class="reset">Resets Today 10:59PM</span><span class="percent">38%</span></div>
+            <div class="track" style="--value: 38%"><i></i></div>
+          </div>
+          <div class="usage secondary">
+            <div class="usage-head"><span class="label">Weekly</span><span class="reset">Resets Sep 15, 6:19PM</span><span class="percent">61%</span></div>
+            <div class="track" style="--value: 61%"><i></i></div>
+          </div>
+        </div>
 
-    <section class="variant" data-variant="C">
-      <div class="c-title">Usage</div>
-      <div class="columns grow">
-        <article class="column">
-          <div class="column-head"><span>Claude</span><button class="icon-button" aria-label="Add Claude account">+</button></div>
-          <h3>arshath</h3><div class="plan">Pro</div>
-          <div class="column-error"><b>Rate limited</b>Claude usage unavailable. Retry later.</div>
-        </article>
-        <article class="column">
-          <div class="column-head"><span>Codex</span><button class="icon-button" aria-label="Add Codex account">+</button></div>
-          <h3>arshath</h3><div class="plan">Plus</div>
-          <div class="stat"><div class="stat-label">Session</div><div class="stat-value mono">0%</div><div class="meter empty"><i></i></div></div>
-          <div class="stat"><div class="stat-label">Weekly</div><div class="stat-value mono green">52%</div><div class="meter"><i></i></div></div>
-        </article>
-      </div>
-      <footer class="footer"><button>Refresh</button><span class="grow"></span><button>Quit</button></footer>
+        <div class="variant b" data-variant="B">
+          <div class="usage">
+            <div class="usage-head"><span class="label">Session</span><span class="reset-block"><span class="reset-key">Reset</span><span class="reset">Today 10:59PM</span></span><span class="percent">38%</span></div>
+            <div class="track" style="--value: 38%"><i></i></div>
+          </div>
+          <div class="usage secondary">
+            <div class="usage-head"><span class="label">Weekly</span><span class="reset-block"><span class="reset-key">Reset</span><span class="reset">Sep 15, 6:19PM</span></span><span class="percent">61%</span></div>
+            <div class="track" style="--value: 61%"><i></i></div>
+          </div>
+        </div>
+
+        <div class="variant c" data-variant="C">
+          <div class="usage">
+            <div class="usage-head"><span class="label">Session</span><span class="reset-chip">Resets Today 10:59PM</span><span class="percent">38%</span></div>
+            <div class="track" style="--value: 38%"><i></i></div>
+          </div>
+          <div class="usage secondary">
+            <div class="usage-head"><span class="label">Weekly</span><span class="reset-chip">Resets Sep 15, 6:19PM</span><span class="percent">61%</span></div>
+            <div class="track" style="--value: 61%"><i></i></div>
+          </div>
+        </div>
+      </article>
     </section>
   </main>
 
@@ -262,13 +269,13 @@
 
   <script>
     const variants = [
-      { key: "A", name: "Compact ledger" },
-      { key: "B", name: "Active first" },
-      { key: "C", name: "Provider split" }
+      { key: "A", name: "Inline reset" },
+      { key: "B", name: "Reset column" },
+      { key: "C", name: "Reset chip" }
     ];
     const model = {
-      claude: { account: "arshath", plan: "Pro", status: "rate_limited" },
-      codex: { account: "arshath", plan: "Plus", session: 0, weekly: 52 }
+      session: { usage: 38, resets: "Today 10:59PM" },
+      weekly: { usage: 61, resets: "Sep 15, 6:19PM" }
     };
     let current = new URLSearchParams(location.search).get("variant")?.toUpperCase() || "A";
     if (!variants.some(item => item.key === current)) current = "A";

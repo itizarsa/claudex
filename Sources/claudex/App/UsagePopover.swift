@@ -140,8 +140,18 @@ struct AccountCard: View {
 
             switch state {
             case .ok(let snapshot):
-                WindowRow(label: "Session", window: snapshot.fiveHour, emphasis: true)
-                WindowRow(label: "Weekly", window: snapshot.weekly, emphasis: false)
+                WindowRow(
+                    label: "Session",
+                    window: snapshot.fiveHour,
+                    emphasis: true,
+                    unavailableResetText: "Starts next message"
+                )
+                WindowRow(
+                    label: "Weekly",
+                    window: snapshot.weekly,
+                    emphasis: false,
+                    unavailableResetText: nil
+                )
             case .loading, .idle:
                 SkeletonRow()
                 SkeletonRow()
@@ -326,41 +336,54 @@ struct Tag: View {
     }
 }
 
-/// One window: label and percentage on a line, the bar under it, the reset time beneath.
+/// One window: label, reset context, and percentage on one line with the bar under it.
 struct WindowRow: View {
     let label: String
     let window: UsageWindow
     let emphasis: Bool
+    let unavailableResetText: String?
 
     var body: some View {
-        // Both windows are drawn the same way — label, percentage, bar, caption — so the two
-        // rows of a card read as one table. A window with no reset time still gets its caption
-        // line, otherwise the session row sat higher than the weekly row under it.
+        // Reset timing belongs to its window label. The quiet chip keeps that relationship
+        // visible without competing with the percentage.
         VStack(alignment: .leading, spacing: 5) {
-            HStack(alignment: .firstTextBaseline) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
                 Text(label)
                     .font(Theme.windowLabel)
                     .foregroundStyle(emphasis ? Theme.primaryText : Theme.secondaryText)
+                    .lineLimit(1)
+                    .layoutPriority(1)
+
+                if let resetText {
+                    Text(resetText)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.secondaryText)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 2)
+                        .background(
+                            RoundedRectangle(cornerRadius: 4, style: .continuous)
+                                .fill(Color.primary.opacity(0.07))
+                        )
+                }
+
                 Spacer()
+
                 Text(window.percentText)
                     .font(Theme.percent(Theme.percentSize))
                     .foregroundStyle(window.severity.tone)
+                    .lineLimit(1)
+                    .layoutPriority(1)
             }
 
             UsageBar(window: window)
-
-            Text(caption)
-                .font(Theme.caption)
-                .foregroundStyle(Theme.secondaryText)
         }
     }
 
-    /// The five-hour window has no reset time until the first message opens it — the API
-    /// returns `resets_at: null` — so there is no clock to show, and assuming five hours from
-    /// now would put a time on the card that the next message immediately makes wrong.
-    private var caption: String {
+    private var resetText: String? {
         let reset = window.resetText
-        return reset.isEmpty ? "Starts with the next message" : reset
+        return reset.isEmpty ? unavailableResetText : reset
     }
 }
 
@@ -407,7 +430,7 @@ struct SkeletonRow: View {
     @State private var shimmer = false
 
     var body: some View {
-        // Mirrors WindowRow's three lines at the same heights. A skeleton that is shorter than
+        // Mirrors WindowRow's two lines at the same heights. A skeleton that is shorter than
         // what replaces it makes the whole popover resize when the first reading lands.
         VStack(alignment: .leading, spacing: 5) {
             RoundedRectangle(cornerRadius: Theme.barRadius, style: .continuous)
@@ -416,9 +439,6 @@ struct SkeletonRow: View {
             Capsule(style: .continuous)
                 .fill(Theme.track)
                 .frame(height: Theme.barHeight)
-            RoundedRectangle(cornerRadius: Theme.barRadius, style: .continuous)
-                .fill(Theme.track)
-                .frame(width: 92, height: 10)
         }
         .opacity(shimmer ? 0.45 : 0.85)
         .animation(.easeInOut(duration: 0.9).repeatForever(autoreverses: true), value: shimmer)
