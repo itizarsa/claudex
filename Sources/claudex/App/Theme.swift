@@ -35,18 +35,22 @@ enum Theme {
     // One radius scale, three steps by depth: container, control, bar.
     static let cardRadius: CGFloat = 8
     static let controlRadius: CGFloat = 6
-    static let barRadius: CGFloat = 2.5
+    static let barRadius: CGFloat = 1.5
 
     // A hairline at 0.5 rather than 1: the border defines the card's edge without becoming a
     // line the eye has to read past on every row.
     static let cardStrokeWidth: CGFloat = 0.5
     static let cardPaddingH: CGFloat = 10
+    /// The rail marking the live account. Two points: enough to read as a marked edge from
+    /// across the desktop, thin enough not to become a fourth colour in the card.
+    static let activeRailWidth: CGFloat = 2
     static let cardPaddingV: CGFloat = 8
-    // The bar is a reading aid under the percentage, not the headline. Thin keeps it that way.
-    // 4 pt is the reference's 8 px at 2x; its elapsed marker is 3 pt wide and stands 2 pt proud
-    // of the bar at each end.
-    static let barHeight: CGFloat = 4
-    static let barMarkerWidth: CGFloat = 3
+    // The bar is a reading aid under the percentage, not the headline. Thin keeps it that way:
+    // the reference's 8 px at 2x competed with the number above it, so the bar is drawn at
+    // half that — a rule carrying a colour rather than a block of one. The elapsed marker
+    // keeps its proportion and stands 2 pt proud of the bar at each end.
+    static let barHeight: CGFloat = 3
+    static let barMarkerWidth: CGFloat = 2
     static let popoverWidth: CGFloat = 280
 
     static let transition: Animation = .easeOut(duration: 0.18)
@@ -67,6 +71,8 @@ enum Theme {
     static let caption = Font.system(size: 9, weight: .regular)
     static let sectionHeader = Font.system(size: 11, weight: .semibold)
     static let pill = Font.system(size: 9, weight: .medium)
+    /// The organisation beside an account's name. A step under the name it qualifies.
+    static let chip = Font.system(size: 8, weight: .semibold)
     static let activeTag = Font.system(size: 8, weight: .semibold)
 }
 

@@ -1,0 +1,737 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Claudex account row — org tag prototype</title>
+  <!-- Throwaway prototype: five ways to show the organisation on an account card,
+       switchable via ?variant=. Question: does an org tag to the right beat "Org · Name"? -->
+  <style>
+    :root {
+      color-scheme: dark;
+      --panel: #1b1c1f;
+      --line: rgba(255, 255, 255, .1);
+      --hover: rgba(255, 255, 255, .05);
+      --text: #f2f2f4;
+      --muted: rgba(242, 242, 244, .62);
+      --faint: rgba(242, 242, 244, .45);
+      --accent: #3d8bfd;
+      --green: #5fc98b;
+      --amber: #e0a458;
+      --claude: #d9785a;
+      font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100dvh;
+      padding: 28px 16px 110px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 18px;
+      background: #0b0c0e;
+      color: var(--text);
+    }
+    h1 { margin: 0; font-size: 13px; font-weight: 600; color: var(--muted); }
+    .blurb { margin: 0; max-width: 560px; font-size: 12px; line-height: 1.5; color: var(--faint); text-align: center; }
+
+    /* The real popover is 280 pt wide. Everything below is drawn at that width and then
+       scaled up, so nothing reads as roomier here than it will on screen. */
+    .stage { transform: scale(1.7); transform-origin: top center; }
+    .popover {
+      width: 280px;
+      padding: 10px;
+      border: .5px solid var(--line);
+      border-radius: 12px;
+      background: var(--panel);
+      box-shadow: 0 20px 60px rgba(0, 0, 0, .55);
+    }
+    .section { font-size: 11px; font-weight: 600; color: var(--muted); padding: 2px 2px 6px; }
+
+    .card {
+      padding: 8px 10px;
+      border: .5px solid var(--line);
+      border-radius: 8px;
+    }
+    .card + .card { margin-top: 6px; }
+    .card:hover { background: var(--hover); }
+
+    .head { display: flex; align-items: center; gap: 8px; }
+    .badge {
+      flex: none;
+      width: 24px; height: 24px;
+      display: grid; place-items: center;
+      border-radius: 50%;
+      border: .5px solid rgba(61, 139, 253, .5);
+      color: var(--accent);
+      font: 700 12px/1 -apple-system, sans-serif;
+    }
+    .badge.filled { background: rgba(61, 139, 253, .15); }
+    .names { min-width: 0; flex: 1; }
+    .name { font-size: 11px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .sub { font-size: 9px; color: var(--faint); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .tag {
+      flex: none;
+      padding: 2px 5px;
+      border-radius: 4px;
+      background: rgba(61, 139, 253, .15);
+      color: var(--accent);
+      font-size: 8px; font-weight: 600;
+      white-space: nowrap;
+    }
+    .tag.quiet { background: rgba(255, 255, 255, .07); color: var(--muted); font-weight: 500; }
+    .tag.outline { background: none; border: .5px solid var(--line); color: var(--muted); font-weight: 500; }
+    .tag.warm { background: rgba(217, 120, 90, .16); color: var(--claude); }
+
+    .bars { margin-top: 8px; display: grid; gap: 6px; }
+    .bar-row { display: grid; grid-template-columns: 44px 1fr 30px; align-items: center; gap: 6px; font-size: 9px; color: var(--muted); }
+    .track { height: 4px; border-radius: 2.5px; background: rgba(255, 255, 255, .13); overflow: hidden; }
+    .track > i { display: block; height: 100%; background: var(--green); }
+    .track > i.amber { background: var(--amber); }
+    .pct { text-align: right; font-variant-numeric: tabular-nums; font-weight: 600; color: var(--text); }
+
+    /* B: org sits on the subtitle line, right-aligned, so the top line is one clean name. */
+    .sub-row { display: flex; align-items: center; gap: 6px; }
+    .sub-row .sub { flex: 1; }
+
+    /* D: org as the card's own header strip above the account line. */
+    .strip { display: flex; align-items: center; gap: 6px; margin: -2px 0 7px; font-size: 8px; font-weight: 600; letter-spacing: .06em; text-transform: uppercase; color: var(--faint); }
+    .strip .rule { flex: 1; height: .5px; background: var(--line); }
+
+    /* E: org as a leading chip inside the name line. */
+    .chip {
+      flex: none;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, .08);
+      font-size: 8px; font-weight: 600;
+      color: var(--muted);
+    }
+    .name-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
+    /* I: the name gives way before the chip does — a truncated org still says which seat
+       this is, a truncated name does not. */
+    .name-row .name { min-width: 0; flex: 0 1 auto; }
+    .name-row .chip { flex: 0 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+    /* F/G/H: the status slot has to stop competing with the organisation. Three ways —
+       give status a dot instead of a pill, move status onto the badge, or move it to the
+       card's edge. */
+    .dot { flex: none; width: 5px; height: 5px; border-radius: 50%; background: var(--accent); }
+    .dot.idle { background: rgba(255, 255, 255, .22); }
+    .status {
+      flex: none;
+      display: flex; align-items: center; gap: 4px;
+      font-size: 8px; font-weight: 600; color: var(--accent);
+      white-space: nowrap;
+    }
+    .status.hover-only { color: var(--muted); opacity: 0; }
+    .card:hover .status.hover-only { opacity: 1; }
+    .ring { position: relative; }
+    .ring::after {
+      content: "";
+      position: absolute; right: -1px; bottom: -1px;
+      width: 7px; height: 7px; border-radius: 50%;
+      background: var(--accent); border: 1.5px solid var(--panel);
+    }
+    .rail { border-left: 2px solid var(--accent); padding-left: 8px; }
+    .switch-btn {
+      flex: none; padding: 2px 6px; border-radius: 4px;
+      border: .5px solid var(--line); background: none; color: var(--muted);
+      font: 600 8px/1.4 -apple-system, sans-serif; cursor: pointer; opacity: 0;
+    }
+    .card:hover .switch-btn { opacity: 1; }
+
+    .variant { display: none; }
+    .variant.active { display: block; }
+    .note { max-width: 560px; font-size: 12px; line-height: 1.5; color: var(--muted); text-align: center; }
+
+    .switcher {
+      position: fixed; left: 50%; bottom: 18px; transform: translateX(-50%);
+      display: flex; gap: 6px; padding: 6px;
+      border: 1px solid rgba(255, 255, 255, .12);
+      border-radius: 999px;
+      background: rgba(20, 21, 24, .92);
+      backdrop-filter: blur(12px);
+    }
+    .switcher button {
+      border: 0; padding: 7px 13px; border-radius: 999px;
+      background: transparent; color: var(--muted);
+      font: 500 12px/1 -apple-system, sans-serif; cursor: pointer;
+    }
+    .switcher button:hover { color: var(--text); }
+    .switcher button[aria-current="true"] { background: var(--accent); color: #fff; }
+  </style>
+</head>
+<body>
+  <h1>Account card — where the organisation goes</h1>
+  <p class="blurb">Same four accounts every time: two seats that differ only by organisation, two people inside one organisation, and one long name to break the layout. Drawn at the real 280&nbsp;pt width, scaled 1.7&times;.</p>
+
+  <div class="stage">
+    <div class="popover">
+      <div class="section">CLAUDE</div>
+
+      <!-- A — org tag right, name is the person -->
+      <div class="variant" data-variant="a">
+        <div class="card">
+          <div class="head">
+            <div class="badge filled">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub">Pro · arshath@superfans.io</div>
+            </div>
+            <div class="tag quiet">Personal</div>
+            <div class="tag">Active</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub">Team · arshath@superfans.io</div>
+            </div>
+            <div class="tag quiet">Superfans</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name">Ananth</div>
+              <div class="sub">Team · ananth@superfans.io</div>
+            </div>
+            <div class="tag quiet">Superfans</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name">Maximilian</div>
+              <div class="sub">Team · maximilian@northwindtrading.com</div>
+            </div>
+            <div class="tag quiet">Northwind Trading Co</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- B — org right-aligned on the subtitle line -->
+      <div class="variant" data-variant="b">
+        <div class="card">
+          <div class="head">
+            <div class="badge filled">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub-row">
+                <div class="sub">Pro · arshath@superfans.io</div>
+                <div class="tag outline">Personal</div>
+              </div>
+            </div>
+            <div class="tag">Active</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub-row">
+                <div class="sub">Team · arshath@superfans.io</div>
+                <div class="tag outline">Superfans</div>
+              </div>
+            </div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name">Ananth</div>
+              <div class="sub-row">
+                <div class="sub">Team · ananth@superfans.io</div>
+                <div class="tag outline">Superfans</div>
+              </div>
+            </div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name">Maximilian</div>
+              <div class="sub-row">
+                <div class="sub">Team · maximilian@northwindtrading.com</div>
+                <div class="tag outline">Northwind Trading Co</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- C — org replaces the plan in the subtitle, tag carries the plan -->
+      <div class="variant" data-variant="c">
+        <div class="card">
+          <div class="head">
+            <div class="badge filled">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub">Personal · arshath@superfans.io</div>
+            </div>
+            <div class="tag quiet">Pro</div>
+            <div class="tag">Active</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub">Superfans · arshath@superfans.io</div>
+            </div>
+            <div class="tag quiet">Team</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name">Ananth</div>
+              <div class="sub">Superfans · ananth@superfans.io</div>
+            </div>
+            <div class="tag quiet">Team</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name">Maximilian</div>
+              <div class="sub">Northwind Trading Co · maximilian@northwindtrading.com</div>
+            </div>
+            <div class="tag quiet">Team</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- D — org as a header strip over the card -->
+      <div class="variant" data-variant="d">
+        <div class="card">
+          <div class="strip"><span>Personal</span><span class="rule"></span></div>
+          <div class="head">
+            <div class="badge filled">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub">Pro · arshath@superfans.io</div>
+            </div>
+            <div class="tag">Active</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="strip"><span>Superfans</span><span class="rule"></span></div>
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub">Team · arshath@superfans.io</div>
+            </div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="strip"><span>Superfans</span><span class="rule"></span></div>
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name">Ananth</div>
+              <div class="sub">Team · ananth@superfans.io</div>
+            </div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="strip"><span>Northwind Trading Co</span><span class="rule"></span></div>
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name">Maximilian</div>
+              <div class="sub">Team · maximilian@northwindtrading.com</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- E — org as a chip leading the name -->
+      <div class="variant" data-variant="e">
+        <div class="card">
+          <div class="head">
+            <div class="badge filled">AR</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Personal</span><span class="name">Arshath</span></div>
+              <div class="sub">Pro · arshath@superfans.io</div>
+            </div>
+            <div class="tag">Active</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Superfans</span><span class="name">Arshath</span></div>
+              <div class="sub">Team · arshath@superfans.io</div>
+            </div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Superfans</span><span class="name">Ananth</span></div>
+              <div class="sub">Team · ananth@superfans.io</div>
+            </div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Northwind Trading Co</span><span class="name">Maximilian</span></div>
+              <div class="sub">Team · maximilian@northwindtrading.com</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- F — org chip leads the name, status is a dot -->
+      <div class="variant" data-variant="f">
+        <div class="card">
+          <div class="head">
+            <div class="badge filled">AR</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Personal</span><span class="name">Arshath</span></div>
+              <div class="sub">Pro · arshath@superfans.io</div>
+            </div>
+            <div class="status"><span class="dot"></span>Active</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Superfans</span><span class="name">Arshath</span></div>
+              <div class="sub">Team · arshath@superfans.io</div>
+            </div>
+            <div class="status hover-only"><span class="dot idle"></span>Switch</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Superfans</span><span class="name">Ananth</span></div>
+              <div class="sub">Team · ananth@superfans.io</div>
+            </div>
+            <div class="status hover-only"><span class="dot idle"></span>Switch</div>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Northwind Trading Co</span><span class="name">Maximilian</span></div>
+              <div class="sub">Team · maximilian@northwindtrading.com</div>
+            </div>
+            <div class="status hover-only"><span class="dot idle"></span>Switch</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- G — status on the badge, tag slot belongs to the org -->
+      <div class="variant" data-variant="g">
+        <div class="card">
+          <div class="head">
+            <div class="badge filled ring">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub">Pro · arshath@superfans.io</div>
+            </div>
+            <div class="tag quiet">Personal</div>
+
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name">Arshath</div>
+              <div class="sub">Team · arshath@superfans.io</div>
+            </div>
+            <div class="tag quiet">Superfans</div>
+            <button class="switch-btn">Switch</button>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name">Ananth</div>
+              <div class="sub">Team · ananth@superfans.io</div>
+            </div>
+            <div class="tag quiet">Superfans</div>
+            <button class="switch-btn">Switch</button>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name">Maximilian</div>
+              <div class="sub">Team · maximilian@northwindtrading.com</div>
+            </div>
+            <div class="tag quiet">Northwind Trading Co</div>
+            <button class="switch-btn">Switch</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- H — org chip leads the name, status is the card's rail -->
+      <div class="variant" data-variant="h">
+        <div class="card rail">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Personal</span><span class="name">Arshath</span></div>
+              <div class="sub">Pro · arshath@superfans.io</div>
+            </div>
+
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Superfans</span><span class="name">Arshath</span></div>
+              <div class="sub">Team · arshath@superfans.io</div>
+            </div>
+            <button class="switch-btn">Switch</button>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Superfans</span><span class="name">Ananth</span></div>
+              <div class="sub">Team · ananth@superfans.io</div>
+            </div>
+            <button class="switch-btn">Switch</button>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name-row"><span class="chip">Northwind Trading Co</span><span class="name">Maximilian</span></div>
+              <div class="sub">Team · maximilian@northwindtrading.com</div>
+            </div>
+            <button class="switch-btn">Switch</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- I — H, with the org chip after the name rather than before it -->
+      <div class="variant" data-variant="i">
+        <div class="card rail">
+          <div class="head">
+            <div class="badge filled">AR</div>
+            <div class="names">
+              <div class="name-row"><span class="name">Arshath</span><span class="chip">Personal</span></div>
+              <div class="sub">Pro · arshath@superfans.io</div>
+            </div>
+
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:38%"></i></div><span class="pct">38%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:61%"></i></div><span class="pct">61%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AR</div>
+            <div class="names">
+              <div class="name-row"><span class="name">Arshath</span><span class="chip">Superfans</span></div>
+              <div class="sub">Team · arshath@superfans.io</div>
+            </div>
+            <button class="switch-btn">Switch</button>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i class="amber" style="width:74%"></i></div><span class="pct">74%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:22%"></i></div><span class="pct">22%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">AN</div>
+            <div class="names">
+              <div class="name-row"><span class="name">Ananth</span><span class="chip">Superfans</span></div>
+              <div class="sub">Team · ananth@superfans.io</div>
+            </div>
+            <button class="switch-btn">Switch</button>
+          </div>
+          <div class="bars">
+            <div class="bar-row"><span>Session</span><div class="track"><i style="width:12%"></i></div><span class="pct">12%</span></div>
+            <div class="bar-row"><span>Weekly</span><div class="track"><i style="width:44%"></i></div><span class="pct">44%</span></div>
+          </div>
+        </div>
+        <div class="card">
+          <div class="head">
+            <div class="badge">MA</div>
+            <div class="names">
+              <div class="name-row"><span class="name">Maximilian</span><span class="chip">Northwind Trading Co</span></div>
+              <div class="sub">Team · maximilian@northwindtrading.com</div>
+            </div>
+            <button class="switch-btn">Switch</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <p class="note" id="note"></p>
+
+  <nav class="switcher" id="switcher"></nav>
+
+  <script>
+    const VARIANTS = {
+      a: ['A · tag right', 'Org is a quiet tag on the name line, left of the Active tag. Two tags can sit side by side on the active card, and a long org squeezes the name.'],
+      b: ['B · tag under', 'Org is an outlined tag at the end of the subtitle line. The name line stays a single clean name; the Active tag never shares a row with it.'],
+      c: ['C · org in subtitle', 'Org takes the plan’s place in the subtitle and the plan becomes the tag. Nothing new is added to the row — the two facts swap weight.'],
+      d: ['D · header strip', 'Org is a small uppercase strip above the account line, so seats in one org read as a group even when the cards are not adjacent.'],
+      e: ['E · leading chip', 'Org is a chip before the name. Strongest grouping on the name line itself, but it pushes the name right and a long org truncates it.'],
+      f: ['F · chip + dot', 'E, with the status pill demoted to a dot and a word. The org keeps the chip shape, status keeps the colour, so nothing reads as two competing tags. Hover a card for Switch.'],
+      g: ['G · status on the badge', 'A, with status out of the tag slot: the badge carries a live dot and Switch is a hover button. The tag on the right is only ever the organisation.'],
+      i: ['I · name, then org chip', 'H with the chip after the name: the name starts at the same x on every card, so the column scans as a list of people, and the org trails as the qualifier. On the long-org row the name holds and the chip truncates.'],
+      h: ['H · status is the rail', 'E, with status at the card edge: an accent rail marks the active card and Switch appears on hover. The name line carries identity only.'],
+    };
+
+    const nav = document.getElementById('switcher');
+    const note = document.getElementById('note');
+
+    function show(key) {
+      for (const el of document.querySelectorAll('.variant')) {
+        el.classList.toggle('active', el.dataset.variant === key);
+      }
+      for (const button of nav.children) {
+        button.setAttribute('aria-current', String(button.dataset.variant === key));
+      }
+      note.textContent = VARIANTS[key][1];
+      const url = new URL(location.href);
+      url.searchParams.set('variant', key);
+      history.replaceState(null, '', url);
+      console.log('variant', key, VARIANTS[key][0]);
+    }
+
+    for (const [key, [title]] of Object.entries(VARIANTS)) {
+      const button = document.createElement('button');
+      button.textContent = title;
+      button.dataset.variant = key;
+      button.onclick = () => show(key);
+      nav.append(button);
+    }
+
+    show(new URL(location.href).searchParams.get('variant') || 'a');
+  </script>
+</body>
+</html>

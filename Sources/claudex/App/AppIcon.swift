@@ -8,6 +8,10 @@ import ClaudexCore
 /// menu-bar ring at size, on the panel's own dark surface, with no alias in the middle: the
 /// letter identifies an account, and the app icon identifies the app.
 ///
+/// Two rings rather than one, because two windows are what the app tracks: the five-hour
+/// session inside, the week around it. The pair reads as a gauge at 512 px and as a thick green
+/// arc with a lighter halo at 32 px, which is the size the login-items list uses.
+///
 /// Rendered by the binary itself so the icon cannot drift from the ring it is modelled on;
 /// `make icon` calls it and `iconutil` turns the result into `Claudex.icns`.
 enum AppIcon {
@@ -17,11 +21,16 @@ enum AppIcon {
     private static let inset: CGFloat = 100
     private static let cornerRadius: CGFloat = 185
 
-    /// The one reading the mark carries: a window most of the way through, with the clock a
-    /// little behind it. Fixed, because an icon showing live numbers would be a second,
-    /// slower menu bar.
-    private static let usage: Double = 0.68
+    /// The one reading the mark carries: a session window most of the way through with the
+    /// clock a little behind it, and a quieter week around it. Fixed, because an icon showing
+    /// live numbers would be a second, slower menu bar.
+    private static let session: Double = 0.68
     private static let elapsed: Double = 0.55
+    private static let week: Double = 0.42
+
+    /// The dark appearance's green, fixed. `adaptiveGreen` resolves against whatever appearance
+    /// is current when the icon is rendered, and the icon's own surface is dark either way.
+    private static let green = NSColor(red: 69 / 255, green: 205 / 255, blue: 114 / 255, alpha: 1)
 
     static func image(side: CGFloat = 1024) -> NSImage {
         let scale = side / 1024
@@ -31,9 +40,29 @@ enum AppIcon {
             drawSurface(box, radius: cornerRadius * scale)
 
             let center = NSPoint(x: box.midX, y: box.midY)
-            let lineWidth = 74 * scale
-            let radius = 260 * scale
-            drawRing(center: center, radius: radius, lineWidth: lineWidth, scale: scale)
+
+            // The week: outside, thin, dim. It is context for the session ring, so it has to be
+            // legible without being the thing the eye lands on.
+            drawRing(
+                center: center,
+                radius: 350 * scale,
+                lineWidth: 26 * scale,
+                fraction: week,
+                colour: green.withAlphaComponent(0.45),
+                trackAlpha: 0.08
+            )
+
+            // The session: the mark proper, at the weight the menu bar draws it.
+            drawGlow(center: center, radius: 225 * scale, lineWidth: 82 * scale, fraction: session)
+            drawRing(
+                center: center,
+                radius: 225 * scale,
+                lineWidth: 82 * scale,
+                fraction: session,
+                colour: green,
+                trackAlpha: 0.14
+            )
+            drawNotch(center: center, radius: 225 * scale, lineWidth: 82 * scale, scale: scale)
             return true
         }
     }
@@ -53,23 +82,31 @@ enum AppIcon {
     private static func drawSurface(_ box: NSRect, radius: CGFloat) {
         let shape = NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius)
         let gradient = NSGradient(
-            starting: NSColor(red: 0.16, green: 0.155, blue: 0.155, alpha: 1),
-            ending: NSColor(red: 0.09, green: 0.088, blue: 0.088, alpha: 1)
+            starting: NSColor(red: 0.18, green: 0.175, blue: 0.175, alpha: 1),
+            ending: NSColor(red: 0.07, green: 0.069, blue: 0.069, alpha: 1)
         )
         gradient?.draw(in: shape, angle: -90)
 
         // A hairline where the light would catch the edge. Without it the square reads as a hole
         // on a dark desktop.
         shape.lineWidth = max(1, box.width / 512)
-        NSColor.white.withAlphaComponent(0.08).setStroke()
+        NSColor.white.withAlphaComponent(0.10).setStroke()
         shape.stroke()
     }
 
-    private static func drawRing(center: NSPoint, radius: CGFloat, lineWidth: CGFloat, scale: CGFloat) {
+    /// Track plus arc, the same two strokes the menu bar draws, at whatever weight is asked for.
+    private static func drawRing(
+        center: NSPoint,
+        radius: CGFloat,
+        lineWidth: CGFloat,
+        fraction: Double,
+        colour: NSColor,
+        trackAlpha: CGFloat
+    ) {
         let track = NSBezierPath()
         track.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360)
         track.lineWidth = lineWidth
-        NSColor.white.withAlphaComponent(0.13).setStroke()
+        NSColor.white.withAlphaComponent(trackAlpha).setStroke()
         track.stroke()
 
         let arc = NSBezierPath()
@@ -77,18 +114,40 @@ enum AppIcon {
             withCenter: center,
             radius: radius,
             startAngle: 90,
-            endAngle: 90 - 360 * usage,
+            endAngle: 90 - 360 * fraction,
             clockwise: true
         )
         arc.lineWidth = lineWidth
         arc.lineCapStyle = .round
-        NSColor.adaptiveGreen.setStroke()
+        colour.setStroke()
         arc.stroke()
+    }
 
-        // Same notch as the menu bar: across the stroke, proud either side, so the two marks
-        // read as the same idea at two sizes.
+    /// Bloom under the session arc: the same arc stroked wider and fainter, twice. A shadow
+    /// would darken the surface instead, and the surface is already near black — what lifts the
+    /// arc off it is light spilling outward, not a drop behind it.
+    private static func drawGlow(center: NSPoint, radius: CGFloat, lineWidth: CGFloat, fraction: Double) {
+        for (spread, alpha) in [(2.1, 0.07), (1.5, 0.10)] as [(CGFloat, CGFloat)] {
+            let bloom = NSBezierPath()
+            bloom.appendArc(
+                withCenter: center,
+                radius: radius,
+                startAngle: 90,
+                endAngle: 90 - 360 * fraction,
+                clockwise: true
+            )
+            bloom.lineWidth = lineWidth * spread
+            bloom.lineCapStyle = .round
+            green.withAlphaComponent(alpha).setStroke()
+            bloom.stroke()
+        }
+    }
+
+    /// Same notch as the menu bar: across the stroke, proud either side, so the two marks read
+    /// as the same idea at two sizes.
+    private static func drawNotch(center: NSPoint, radius: CGFloat, lineWidth: CGFloat, scale: CGFloat) {
         let angle = (90 - 360 * elapsed) * .pi / 180
-        let reach = lineWidth / 2 + 34 * scale
+        let reach = lineWidth / 2 + 30 * scale
         let notch = NSBezierPath()
         notch.move(to: NSPoint(
             x: center.x + cos(angle) * (radius - reach),

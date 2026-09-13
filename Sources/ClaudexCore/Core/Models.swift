@@ -38,10 +38,11 @@ public struct Account: Codable, Identifiable, Equatable, Sendable {
     public var order: Int
     public var addedAt: Date
 
-    /// What the ring shows. Falls back to the first letter of the label.
+    /// What the ring shows. Two letters rather than one: a single initial collides as soon as
+    /// two accounts share it, and "AR" reads as a name where "A" reads as a marker.
     public var badge: String {
         if let alias, !alias.isEmpty { return String(alias.prefix(2)).uppercased() }
-        return String(label.prefix(1)).uppercased()
+        return String(label.prefix(2)).uppercased()
     }
 
     public init(

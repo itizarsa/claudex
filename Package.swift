@@ -17,7 +17,7 @@ let package = Package(
             name: "claudex",
             dependencies: ["ClaudexCore"],
             path: "Sources/claudex",
-            exclude: ["App/UsagePopover.prototype.html"],
+            exclude: ["App/AccountRow.prototype.html", "App/UsagePopover.prototype.html"],
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),
         .testTarget(
