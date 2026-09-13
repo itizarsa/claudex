@@ -19,7 +19,7 @@ TESTFW   := $(wildcard $(DEVDIR)/Library/Developer/Frameworks)
 TESTLIB  := $(DEVDIR)/Library/Developer/usr/lib
 TESTARGS := $(if $(TESTFW),-Xswiftc -F -Xswiftc $(TESTFW) -Xlinker -rpath -Xlinker $(TESTFW) -Xlinker -rpath -Xlinker $(TESTLIB))
 
-.PHONY: all build test icon bundle install uninstall verify run prototype clean
+.PHONY: all build test icon bundle install uninstall verify run prototype prototype-accounts clean
 
 all: bundle
 
@@ -81,6 +81,9 @@ run: bundle
 
 prototype:
 	open Sources/claudex/App/UsagePopover.prototype.html
+
+prototype-accounts:
+	open Sources/claudex/App/AccountBrowser.prototype.html
 
 clean:
 	rm -rf .build build

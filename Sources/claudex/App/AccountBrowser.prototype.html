@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Claudex account browser prototype</title>
+  <!-- Throwaway prototype: three account-browsing models, switchable via ?variant=. -->
+  <style>
+    :root {
+      color-scheme: dark;
+      --page:#0b0c0e; --panel:#1b1c1f; --card:#222328; --raised:#292a30;
+      --line:rgba(255,255,255,.1); --text:#f2f2f4; --muted:rgba(242,242,244,.62);
+      --faint:rgba(242,242,244,.4); --accent:#4b94ef; --green:#45cd72;
+      --amber:#e0a458; --red:#ff6058;
+      font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text",sans-serif;
+    }
+    *{box-sizing:border-box} body{margin:0;min-height:100dvh;display:grid;place-items:center;
+      padding:24px 14px 100px;background:radial-gradient(circle at 50% 8%,#15233a 0,var(--page) 33rem);color:var(--text)}
+    button{font:inherit} button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+    .shell{width:280px;min-height:474px;overflow:hidden;border:.5px solid var(--line);border-radius:13px;
+      background:rgba(27,28,31,.97);box-shadow:0 24px 70px #0009}
+    .variant{display:none;min-height:474px}.variant.active{display:flex;flex-direction:column}
+    .head{display:flex;align-items:center;min-height:42px;padding:0 11px;border-bottom:.5px solid var(--line)}
+    .head strong{font-size:11px;letter-spacing:.06em}.count{margin-left:6px;color:var(--faint);font-size:8px}
+    .grow{flex:1}.add{width:24px;height:24px;border:0;border-radius:6px;background:transparent;color:var(--muted);cursor:pointer}
+    .add:hover{background:#ffffff0d;color:var(--text)}
+    .footer{display:flex;align-items:center;min-height:40px;padding:0 9px;border-top:.5px solid var(--line);color:var(--muted);font-size:8px}
+    .footer button{border:0;padding:5px;background:none;color:inherit;cursor:pointer}.footer button:hover{color:var(--text)}
+    .badge{flex:none;width:24px;height:24px;display:grid;place-items:center;border:.5px solid #4b94ef80;
+      border-radius:50%;color:var(--accent);font-size:10px;font-weight:750}.badge.active{background:#4b94ef26}
+    .identity{min-width:0}.identity-line{display:flex;align-items:center;gap:5px;min-width:0}
+    .name{overflow:hidden;font-size:11px;font-weight:650;text-overflow:ellipsis;white-space:nowrap}
+    .org{overflow:hidden;max-width:76px;padding:1px 4px;border-radius:3px;background:#ffffff12;
+      color:var(--muted);font-size:7px;font-weight:650;text-overflow:ellipsis;white-space:nowrap}
+    .sub{overflow:hidden;color:var(--faint);font-size:8px;text-overflow:ellipsis;white-space:nowrap}
+    .live{color:var(--accent);font-size:7px;font-weight:700}.window{margin-top:10px}
+    .window-head{display:flex;align-items:baseline;margin-bottom:4px}.window-label{color:var(--muted);font-size:8px}
+    .percent{margin-left:auto;font-size:11px;font-weight:650;font-variant-numeric:tabular-nums}
+    .track{height:3px;overflow:hidden;border-radius:2px;background:#ffffff21}.fill{display:block;height:100%;border-radius:inherit;background:var(--green)}
+    .fill.amber{background:var(--amber)}.fill.red{background:var(--red)}.reset{margin-top:3px;color:var(--faint);font-size:7px}
+    .action{width:100%;margin-top:11px;padding:6px;border:.5px solid var(--line);border-radius:6px;
+      background:#ffffff09;color:var(--muted);font-size:8px;cursor:pointer}.action:hover{background:#ffffff14;color:var(--text)}
+
+    /* A: active stays first. Any card can unfold without reordering. */
+    .deck{flex:1;padding:10px}.deck-card{position:relative;overflow:hidden;min-height:42px;margin-top:-4px;padding:8px 9px;
+      border:.5px solid var(--line);border-radius:8px;background:var(--card);box-shadow:0 -5px 12px #0003;cursor:pointer;
+      transition:min-height .22s ease,background .18s ease,transform .18s ease}
+    .deck-card:first-child{margin-top:0}.deck-card:hover{background:var(--raised);transform:translateY(-1px)}
+    .deck-card.selected{min-height:150px;background:#26272c;cursor:default}.deck-card.is-active{border-left:2px solid var(--accent)}
+    .deck-summary{display:grid;grid-template-columns:24px minmax(0,1fr) auto;align-items:center;gap:7px}
+    .deck-tools{display:flex;align-items:center;justify-content:flex-end;min-width:54px}
+    .deck-activate{padding:5px 7px;border:0;border-radius:5px;background:var(--accent);color:white;font-size:7px;font-weight:650;cursor:pointer}
+    .deck-activate:hover{filter:brightness(1.1)}.deck-activate:disabled{opacity:.6}
+    .chevron{color:var(--faint);font-size:10px;transition:transform .18s}.deck-card.selected .chevron{transform:rotate(180deg)}
+    .deck-detail{max-height:0;overflow:hidden;opacity:0;transition:max-height .22s ease,opacity .14s}
+    .deck-card.selected .deck-detail{max-height:110px;opacity:1}.deck-windows{display:block}
+    .hint{margin-top:7px;color:var(--faint);font-size:7px;text-align:center}
+
+    /* B: single account carousel with neighbour peeks. */
+    .carousel-wrap{position:relative;flex:1;overflow:hidden;padding:18px 0 5px}.carousel-viewport{width:226px;margin:auto;overflow:visible}
+    .carousel-track{display:flex;transition:transform .28s cubic-bezier(.2,.8,.2,1)}
+    .carousel-card{flex:0 0 226px;min-height:292px;padding:13px;border:.5px solid var(--line);border-radius:11px;
+      background:var(--card);opacity:.35;transform:scale(.94);transition:opacity .2s,transform .28s}
+    .carousel-card.current{opacity:1;transform:scale(1)}.carousel-card.is-active{border-top:2px solid var(--accent)}
+    .carousel-id{display:flex;align-items:center;gap:8px}.carousel-id .identity{flex:1}
+    .hero-number{margin:22px 0 2px;font-size:39px;font-weight:620;letter-spacing:-2px;font-variant-numeric:tabular-nums}
+    .hero-caption{color:var(--muted);font-size:7px}.weekly{margin-top:24px;padding-top:11px;border-top:.5px solid var(--line)}
+    .dots{display:flex;justify-content:center;gap:5px;min-height:8px}.dot{width:4px;height:4px;padding:0;border:0;border-radius:50%;background:#ffffff2e;cursor:pointer}
+    .dot.current{width:12px;border-radius:3px;background:var(--accent)}
+    .carousel-nav{display:flex;align-items:center;justify-content:center;gap:10px;min-height:33px}.carousel-nav button{width:26px;height:23px;
+      border:0;border-radius:6px;background:#ffffff0f;color:var(--muted);cursor:pointer}.carousel-index{min-width:58px;color:var(--faint);font-size:8px;text-align:center}
+
+    /* C: active card pinned, every other account reduced to a selector. */
+    .focus{flex:1;padding:10px}.active-pin{display:flex;align-items:center;gap:8px;padding:9px;border-left:2px solid var(--accent);
+      border-radius:8px;background:#4b94ef14}.active-pin .identity{flex:1}
+    .account-strip{display:flex;gap:6px;margin:10px 0;overflow-x:auto;scrollbar-width:none}.account-strip::-webkit-scrollbar{display:none}
+    .mini{flex:0 0 55px;padding:7px 5px;border:.5px solid var(--line);border-radius:7px;background:transparent;color:var(--muted);text-align:center;cursor:pointer}
+    .mini:hover{background:#ffffff0d}.mini.selected{border-color:#4b94ef8c;background:#4b94ef1a;color:var(--text)}
+    .mini-badge{font-size:9px;font-weight:750}.mini-name{overflow:hidden;margin-top:4px;font-size:7px;text-overflow:ellipsis;white-space:nowrap}
+    .detail{min-height:202px;padding:12px;border:.5px solid var(--line);border-radius:9px;background:var(--card)}
+    .detail-title{display:flex;align-items:center;gap:7px}.detail-title .identity{flex:1}.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:15px}
+    .detail-stat{padding:9px;border-radius:7px;background:#ffffff09}.detail-stat .percent{display:block;margin:5px 0 8px;font-size:18px}
+
+    .switcher{position:fixed;left:50%;bottom:18px;transform:translateX(-50%);display:flex;gap:5px;padding:6px;
+      border:1px solid #ffffff24;border-radius:999px;background:#15161aee;box-shadow:0 12px 36px #0008;backdrop-filter:blur(14px);z-index:10}
+    .switcher button{border:0;padding:7px 10px;border-radius:999px;background:transparent;color:var(--muted);font-size:9px;cursor:pointer}
+    .switcher button:hover{color:var(--text)}.switcher button[aria-current="true"]{background:var(--accent);color:white}
+    .state{position:fixed;top:10px;right:10px;max-width:210px;color:#ffffff42;font:8px/1.45 ui-monospace,SFMono-Regular,Menlo,monospace;text-align:right}
+    @media(max-width:620px){.state{display:none}}
+  </style>
+</head>
+<body>
+  <main class="shell" aria-label="Claudex account browser prototype">
+    <section class="variant" data-variant="A">
+      <header class="head"><strong>CLAUDE</strong><span class="count">5 accounts</span><span class="grow"></span><button class="add" aria-label="Add account">+</button></header>
+      <div class="deck" id="deck"></div>
+      <footer class="footer"><button>Codex · 2</button><span class="grow"></span><button>Refresh</button><button>⚙</button></footer>
+    </section>
+    <section class="variant" data-variant="B">
+      <header class="head"><strong>CLAUDE</strong><span class="count">active first</span><span class="grow"></span><button class="add" aria-label="Add account">+</button></header>
+      <div class="carousel-wrap"><div class="carousel-viewport"><div class="carousel-track" id="carousel-track"></div></div></div>
+      <div class="dots" id="dots"></div><div class="carousel-nav"><button id="account-prev">←</button><span class="carousel-index" id="carousel-index"></span><button id="account-next">→</button></div>
+      <footer class="footer"><button>Claude</button><button>Codex · 2</button><span class="grow"></span><button>⚙</button></footer>
+    </section>
+    <section class="variant" data-variant="C">
+      <header class="head"><strong>CLAUDE</strong><span class="count">quick switcher</span><span class="grow"></span><button class="add" aria-label="Add account">+</button></header>
+      <div class="focus"><div class="active-pin" id="active-pin"></div><div class="account-strip" id="account-strip"></div><div class="detail" id="detail"></div></div>
+      <footer class="footer"><button>Codex · 2</button><span class="grow"></span><button>Refresh</button><button>⚙</button></footer>
+    </section>
+  </main>
+  <aside class="state" id="state"></aside><nav class="switcher" id="switcher" aria-label="Prototype variants"></nav>
+  <script>
+    const variants=[{key:"A",name:"Stack"},{key:"B",name:"Carousel"},{key:"C",name:"Focus rail"}];
+    // Active intentionally first. Others retain stored rotation order.
+    const accounts=[
+      {id:"work",badge:"AR",name:"Arshath",org:"Superfans",plan:"Team",email:"arshath@superfans.io",session:38,weekly:61,active:true},
+      {id:"personal",badge:"AP",name:"Arshath",org:"Personal",plan:"Pro",email:"arshath@gmail.com",session:12,weekly:27},
+      {id:"ananth",badge:"AN",name:"Ananth",org:"Superfans",plan:"Team",email:"ananth@superfans.io",session:74,weekly:42},
+      {id:"maya",badge:"MK",name:"Maya",org:"Northwind",plan:"Team",email:"maya@northwind.dev",session:91,weekly:84},
+      {id:"backup",badge:"BK",name:"Backup",org:"Personal",plan:"Max",email:"claude.backup@gmail.com",session:3,weekly:8}
+    ];
+    const state={variant:new URLSearchParams(location.search).get("variant")?.toUpperCase()||"A",expanded:"work",carousel:0,focused:"personal",activation:null};
+    if(!variants.some(v=>v.key===state.variant))state.variant="A";
+    const tone=n=>n>=90?"red":n>=70?"amber":"";
+    const identity=(a,label=true)=>`<div class="badge ${a.active?"active":""}">${a.badge}</div><div class="identity"><div class="identity-line"><span class="name">${a.name}</span><span class="org">${a.org}</span></div><div class="sub">${a.plan} · ${a.email}</div></div>${label&&a.active?'<span class="live">ACTIVE</span>':""}`;
+    const windowRow=(label,value,reset)=>`<div class="window"><div class="window-head"><span class="window-label">${label}</span><span class="percent">${value}%</span></div><div class="track"><i class="fill ${tone(value)}" style="width:${value}%"></i></div><div class="reset">${reset}</div></div>`;
+
+    function renderDeck(){
+      deck.innerHTML=accounts.map(a=>{const selected=a.id===state.expanded;const tool=a.active?'<span class="live">ACTIVE</span>':selected?`<button class="deck-activate" data-activate="${a.id}">Make active</button>`:'<span class="chevron">⌄</span>';return `<article class="deck-card ${selected?"selected":""} ${a.active?"is-active":""}" data-id="${a.id}" tabindex="0" role="button" aria-expanded="${selected}"><div class="deck-summary">${identity(a,false)}<div class="deck-tools">${tool}</div></div><div class="deck-detail"><div class="deck-windows">${windowRow("Session",a.session,"Resets today at 10:59 PM")}${windowRow("Weekly",a.weekly,"Resets Monday at 6:19 PM")}</div></div></article>`}).join("")+`<div class="hint">Click account to unfold. Active stays first.</div>`;
+      document.querySelectorAll(".deck-card").forEach(card=>{const select=()=>{state.expanded=card.dataset.id;renderDeck();renderState()};card.onclick=select;card.onkeydown=e=>{if(e.key==="Enter"||e.key===" "){e.preventDefault();select()}}});
+      document.querySelectorAll(".deck-activate").forEach(button=>button.onclick=e=>{e.stopPropagation();state.activation=button.dataset.activate;button.textContent="Switching…";button.disabled=true;renderState()});
+    }
+    function renderCarousel(){
+      document.getElementById("carousel-track").innerHTML=accounts.map((a,i)=>`<article class="carousel-card ${i===state.carousel?"current":""} ${a.active?"is-active":""}"><div class="carousel-id">${identity(a)}</div><div class="hero-number">${a.session}%</div><div class="hero-caption">SESSION · resets today at 10:59 PM</div><div class="track"><i class="fill ${tone(a.session)}" style="width:${a.session}%"></i></div><div class="weekly">${windowRow("Weekly",a.weekly,"Resets Monday at 6:19 PM")}</div>${a.active?"":'<button class="action">Make active</button>'}</article>`).join("");
+      document.getElementById("carousel-track").style.transform=`translateX(${-226*state.carousel}px)`;document.getElementById("carousel-index").textContent=`${state.carousel+1} of ${accounts.length}`;
+      dots.innerHTML=accounts.map((a,i)=>`<button class="dot ${i===state.carousel?"current":""}" data-index="${i}" aria-label="Show ${a.name} ${a.org}"></button>`).join("");
+      document.querySelectorAll(".dot").forEach(dot=>dot.onclick=()=>{state.carousel=Number(dot.dataset.index);renderCarousel();renderState()});
+    }
+    function cycleAccount(offset){state.carousel=(state.carousel+offset+accounts.length)%accounts.length;renderCarousel();renderState()}
+    function renderFocus(){
+      const active=accounts[0],focused=accounts.find(a=>a.id===state.focused)||active;
+      document.getElementById("active-pin").innerHTML=`${identity(active)}<span class="percent">${active.session}%</span>`;
+      document.getElementById("account-strip").innerHTML=accounts.slice(1).map(a=>`<button class="mini ${a.id===focused.id?"selected":""}" data-id="${a.id}"><div class="mini-badge">${a.badge}</div><div class="mini-name">${a.name}</div></button>`).join("");
+      detail.innerHTML=`<div class="detail-title">${identity(focused)}</div><div class="detail-grid"><div class="detail-stat"><span class="window-label">Session</span><span class="percent">${focused.session}%</span><div class="track"><i class="fill ${tone(focused.session)}" style="width:${focused.session}%"></i></div></div><div class="detail-stat"><span class="window-label">Weekly</span><span class="percent">${focused.weekly}%</span><div class="track"><i class="fill ${tone(focused.weekly)}" style="width:${focused.weekly}%"></i></div></div></div><div class="reset">Session resets today 10:59 PM · Weekly resets Monday 6:19 PM</div>${focused.active?"":'<button class="action">Make active</button>'}`;
+      document.querySelectorAll(".mini").forEach(button=>button.onclick=()=>{state.focused=button.dataset.id;renderFocus();renderState()});
+    }
+    function renderState(){const v=variants.find(v=>v.key===state.variant),selection=state.variant==="A"?state.expanded:state.variant==="B"?accounts[state.carousel].id:state.focused;document.getElementById("state").textContent=`${v.name}\norder: ${accounts.map(a=>a.id).join(" · ")}\nselection: ${selection}${state.activation?`\nactivation: ${state.activation}`:""}`}
+    function showVariant(key){state.variant=key;document.querySelectorAll(".variant").forEach(n=>n.classList.toggle("active",n.dataset.variant===key));document.querySelectorAll("#switcher button").forEach(b=>b.setAttribute("aria-current",String(b.dataset.variant===key)));const url=new URL(location.href);url.searchParams.set("variant",key);history.replaceState({},"",url);renderState()}
+    switcher.innerHTML=variants.map(v=>`<button data-variant="${v.key}">${v.key} · ${v.name}</button>`).join("");document.querySelectorAll("#switcher button").forEach(b=>b.onclick=()=>showVariant(b.dataset.variant));
+    document.getElementById("account-prev").onclick=()=>cycleAccount(-1);document.getElementById("account-next").onclick=()=>cycleAccount(1);
+    addEventListener("keydown",e=>{if(state.variant!=="B")return;const tag=document.activeElement?.tagName;if(["INPUT","TEXTAREA"].includes(tag)||document.activeElement?.isContentEditable)return;if(e.key==="ArrowLeft")cycleAccount(-1);if(e.key==="ArrowRight")cycleAccount(1)});
+    renderDeck();renderCarousel();renderFocus();showVariant(state.variant);
+  </script>
+</body>
+</html>
