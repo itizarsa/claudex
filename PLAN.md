@@ -184,11 +184,10 @@ stdin via `security -i`, never in the argument vector, which `ps` can read; the 
 Claude Code's own item, whose exact JSON bytes cannot survive that parser, and which is
 documented in `ClaudeCLIKeychain.writeRaw`.
 
-Tokens therefore live in the Keychain. `Settings.allowKeychain` is on by default and switching
-it off falls back to `vault.json` at mode 0600 inside the app container, which is where they
-lived before. Accounts written under the old default migrate on first read: `Vault.load` moves a
-file entry into the Keychain and deletes it from the file. `--vault` covers both the round trip
-and the migration.
+Tokens therefore live in the Keychain. `vault.json` remains only as a migration source for older
+installs. `KeychainCredentialStore.load` moves a legacy entry into the Keychain and deletes it
+from the file before returning. `--vault` covers a production-store round trip; tests cover the
+migration against an in-memory Keychain adapter.
 
 There is exactly one active account per provider, so a Claude switch never disturbs Codex.
 
@@ -385,7 +384,7 @@ Phase 3 — automation. **Done.** `Rotator` evaluates after every successful pol
 provider's active account, `--rotate` prints the same decision without acting on it, and the
 popover's gear opens the settings that drive it.
 
-`Rotator.decide` is pure and takes its clock as an argument, so the rule can be read without a
+`Rotation.decide` is pure and takes its clock as an argument, so the rule can be read without a
 store, a socket or a timer behind it; the class around it holds only what the rule cannot
 carry, which is when each provider last switched and which exhaustion notice has already been
 sent. Two readings are deliberately asymmetric: an unknown percentage never counts as over
@@ -401,9 +400,8 @@ that did not happen.
 
 The settings live in the popover rather than a window: every control here is one line, and a
 separate window for that is a second thing to find and close. Sliders write to memory as they
-move and to disk when the drag ends; toggles and pickers save on the spot. `Settings.allowKeychain`
-stays without UI on purpose — switching it off strands accounts whose tokens are already in the
-Keychain, so it remains a file-level escape hatch.
+move and to disk when the drag ends; toggles and pickers save on the spot. Credential storage is
+chosen by the application composition root, not a persisted setting.
 
 Phase 4 — in-app sign-in. **Done.** `SandboxedLogin` runs the CLI's own login against a
 throwaway config directory — `CLAUDE_CONFIG_DIR` for `claude auth login --claudeai`, `CODEX_HOME`
@@ -494,12 +492,10 @@ the outgoing account's token; that newer copy exists only in the CLI's store and
 replaced. Reading it back into the vault first is what makes the account still usable when it is
 switched to again.
 
-## One switch for every Keychain call
+## Bounded Keychain calls
 
-`Settings.allowKeychain` gates every Keychain call in the app — claudex's own vault items and
-Claude Code's `Claude Code-credentials` item alike. It is on by default. `Vault` routes to the
-file store when it is off, and `KeychainVault` and `ClaudeCLIKeychain` each re-check the flag
-before spawning `security`, so a single setting still decides the behaviour of every call site.
+`KeychainCredentialStore` owns claudex account items. `ClaudeCLIKeychain` owns Claude Code's
+item. Both use `SecurityCLI`, so no in-process Security framework call can block the app.
 
 Every invocation is bounded by an 8-second timeout. `security` itself has been observed to hang
 indefinitely on some macOS builds, and a Keychain call that stalls a poll is worse than one that

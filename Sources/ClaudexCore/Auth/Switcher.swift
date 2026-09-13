@@ -1,31 +1,36 @@
 import Foundation
 
-/// Sign a CLI into a different stored account.
-///
-/// The order of the three steps matters more than any of them individually, because refresh
-/// tokens rotate: whichever copy is written last is the only one that still works. Harvest the
-/// outgoing account first, persist the incoming account's refreshed tokens before handing them
-/// to the CLI, and only then record the change.
-public enum Switcher {
-    /// Returns false when the account was already active, so a caller reporting the outcome can
-    /// tell a switch from a no-op rather than announcing one for the other.
+public protocol AccountSwitching: Sendable {
     @MainActor
-    @discardableResult
-    public static func activate(_ account: Account, in store: AccountStore) async throws -> Bool {
-        guard !store.isActive(account) else { return false }
-        let provider = Providers.of(account.provider)
+    func activate(_ account: Account) async throws -> Bool
+}
 
-        try harvestOutgoing(account.provider, provider: provider, store: store)
+/// Signs one CLI into a stored account. The module owns the full ordering because refresh-token
+/// rotation makes partial orchestration by callers unsafe.
+@MainActor
+public final class Switcher: AccountSwitching {
+    private let store: AccountStore
+    private let providers: ProviderRegistry
+
+    public init(store: AccountStore, providers: ProviderRegistry) {
+        self.store = store
+        self.providers = providers
+    }
+
+    /// Harvest current CLI state, persist any incoming refresh, activate, then record the new
+    /// active account. Returns false when the CLI already holds the requested account.
+    @discardableResult
+    public func activate(_ account: Account) async throws -> Bool {
+        let provider = try providers.provider(for: account.provider)
+        try await harvestCurrent(account.provider, provider: provider)
+        guard !store.isActive(account) else { return false }
 
         guard var credentials = try store.credentials(for: account) else {
             throw ClaudexError.notSignedIn(account.provider)
         }
 
-        // Refresh before activating rather than leaving it to the CLI. The CLI would manage, but
-        // a switch that hands over an expired token looks like a failed switch, and the rotated
-        // token would then live only in the CLI's store until the next harvest.
         if provider.needsRefresh(credentials, leeway: 300) {
-            credentials = try await provider.refresh(credentials)
+            credentials = try await provider.refreshed(credentials)
             try store.storeCredentials(credentials, for: account)
         }
 
@@ -34,18 +39,28 @@ public enum Switcher {
         return true
     }
 
-    /// The CLI owns the active account's tokens, so it holds refreshes claudex never saw. Copy
-    /// them back before they are overwritten; without this, switching away from an account
-    /// silently invalidates it.
-    @MainActor
-    private static func harvestOutgoing(
-        _ kind: ProviderKind,
-        provider: Provider,
-        store: AccountStore
-    ) throws {
-        guard let outgoing = store.activeAccount(for: kind),
-              let live = try provider.readCurrentCLICredentials()
-        else { return }
-        try store.storeCredentials(live, for: outgoing)
+    /// Reconciles claudex's active pointer with live CLI state before overwriting that state.
+    /// Exact stored matches need no network. A rotated or externally replaced credential is
+    /// identified remotely; an untracked account stops the switch instead of corrupting the
+    /// credential saved under claudex's stale active pointer.
+    private func harvestCurrent(_ kind: ProviderKind, provider: AnyProvider) async throws {
+        guard let live = try provider.currentCLICredentials() else { return }
+
+        if let exact = try store.accounts(for: kind).first(where: {
+            try store.credentials(for: $0)?.refreshFingerprint == live.refreshFingerprint
+        }) {
+            try store.storeCredentials(live, for: exact)
+            if !store.isActive(exact) { store.setActive(exact) }
+            return
+        }
+
+        let identity = try await provider.identity(live)
+        guard let actual = store.existing(matching: identity, kind: kind) else {
+            throw ClaudexError.unsupportedAccount(
+                "\(kind.displayName) CLI is signed into an untracked account. Add it before switching."
+            )
+        }
+        try store.storeCredentials(live, for: actual)
+        if !store.isActive(actual) { store.setActive(actual) }
     }
 }

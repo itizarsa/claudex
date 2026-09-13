@@ -2,43 +2,48 @@ import AppKit
 import Foundation
 import Observation
 
-/// Owns polling, token refresh and the per-account backoff. Nothing here writes to the CLIs.
-///
-/// Refresh tokens rotate: the token endpoint issues a new one and retires the old. That makes
-/// refreshing the account a CLI is currently signed into unsafe, because claudex cannot hand
-/// the replacement back — Claude Code also keeps a copy in a Keychain item, and writing
-/// another application's Keychain item raises an authorisation prompt that a background poll
-/// can never answer. So the active account is treated as owned by the CLI: its credentials
-/// are re-read from disk on every poll, and the CLI is left to refresh its own tokens.
-/// Inactive accounts are owned by claudex and refreshed here.
+/// Owns polling admission, failure backoff, and publishing readings into account state.
+/// Credential ownership and refresh rules live behind `UsageReader.reading(for:)`.
 @MainActor
 @Observable
 public final class UsageEngine {
     private let store: AccountStore
+    private let activity: LocalUsageActivity
+    private let reader: UsageReader
     let notifier: Notifier
     public let rotator: Rotator
     private var timer: Timer?
-    private var lastPolled: [UUID: Date] = [:]
-    private var backoffUntil: [UUID: Date] = [:]
+    private var wakeObserver: NSObjectProtocol?
+    private var isRunning = false
+    private var scheduler = UsagePollScheduler()
     private var failureCount: [UUID: Int] = [:]
     private var inFlight: Set<UUID> = []
 
-    private let refreshLeeway: TimeInterval = 300
     private let maxBackoff: TimeInterval = 15 * 60
 
     public var lastError: String?
 
-    public init(store: AccountStore) {
-        let notifier = Notifier()
+    public init(
+        store: AccountStore,
+        activity: LocalUsageActivity,
+        reader: UsageReader,
+        notifier: Notifier,
+        rotator: Rotator
+    ) {
         self.store = store
+        self.activity = activity
+        self.reader = reader
         self.notifier = notifier
-        self.rotator = Rotator(store: store, notifier: notifier)
+        self.rotator = rotator
     }
 
     // MARK: - Lifecycle
 
     public func start() {
         stop()
+        isRunning = true
+        let now = Date()
+        scheduler.start(accounts: pollCandidates, activity: activityDates, now: now)
         let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
         }
@@ -47,15 +52,13 @@ public final class UsageEngine {
 
         notifier.prepare()
 
-        NotificationCenter.default.addObserver(
+        wakeObserver = NotificationCenter.default.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in
-                // Anything cached across sleep is stale by definition.
-                self?.lastPolled.removeAll()
-                self?.backoffUntil.removeAll()
+                // Wake checks new activity but keeps request floors and provider backoff intact.
                 self?.tick()
             }
         }
@@ -64,44 +67,46 @@ public final class UsageEngine {
     }
 
     public func stop() {
+        isRunning = false
         timer?.invalidate()
         timer = nil
+        if let wakeObserver {
+            NotificationCenter.default.removeObserver(wakeObserver)
+            self.wakeObserver = nil
+        }
     }
 
     /// Whether a poll is in flight, so the panel can dim a card rather than tear it down.
     public func isPolling(_ id: UUID) -> Bool { inFlight.contains(id) }
 
-    /// Poll everything now, ignoring schedule and backoff.
+    /// Request fresh readings. Admission still respects each account's hard floor and backoff.
     public func refreshAll() {
-        lastPolled.removeAll()
-        backoffUntil.removeAll()
+        scheduler.requestRefresh(store.accounts.filter(\.enabled).map(\.id))
         tick()
     }
 
     // MARK: - Scheduling
 
     private func tick() {
+        guard isRunning else { return }
         let now = Date()
-        for account in store.accounts where account.enabled {
-            guard !inFlight.contains(account.id) else { continue }
-            if let until = backoffUntil[account.id], until > now { continue }
+        let candidates = pollCandidates
+        scheduler.reconcile(accounts: candidates, activity: activityDates, now: now)
+        guard inFlight.isEmpty,
+              let candidate = scheduler.nextDueAccount(from: candidates, now: now),
+              let account = store.account(candidate.id)
+        else { return }
 
-            let interval = store.isActive(account)
-                ? store.settings.activePollSeconds
-                : store.settings.idlePollSeconds
-
-            if let last = lastPolled[account.id], now.timeIntervalSince(last) < interval { continue }
-
-            // Stagger idle accounts so they do not all fire in the same second.
-            Task { await poll(account) }
-        }
+        scheduler.didStart(candidate, at: now)
+        inFlight.insert(account.id)
+        Task { await poll(account, candidate: candidate) }
     }
 
-    private func poll(_ account: Account) async {
-        inFlight.insert(account.id)
-        defer { inFlight.remove(account.id) }
-
-        lastPolled[account.id] = Date()
+    private func poll(_ account: Account, candidate: UsagePollCandidate) async {
+        defer {
+            inFlight.remove(account.id)
+            tick()
+        }
         // A skeleton is only honest when there is nothing to show yet. Replacing a live reading
         // or a visible error with one on every refresh makes the panel flicker and resize.
         if case .idle = store.state(account.id) {
@@ -109,11 +114,11 @@ public final class UsageEngine {
         }
 
         do {
-            let snapshot = try await fetch(account)
+            let snapshot = try await reader.reading(for: account)
             store.states[account.id] = .ok(snapshot)
             store.cacheSnapshots()
             failureCount[account.id] = nil
-            backoffUntil[account.id] = nil
+            scheduler.didSucceed(candidate)
 
             // Rotation is evaluated off the active account's reading, because that is the only
             // account whose usage can put the CLI over budget. Inactive readings matter only as
@@ -122,80 +127,43 @@ public final class UsageEngine {
                 await rotator.evaluate(account.provider)
             }
         } catch {
-            handle(error, for: account)
+            handle(error, for: account, candidate: candidate)
         }
     }
 
-    private func fetch(_ account: Account) async throws -> UsageSnapshot {
-        let provider = Providers.of(account.provider)
-
-        if store.isActive(account) {
-            return try await fetchActive(provider, account)
-        }
-        return try await fetchInactive(provider, account)
+    private var activityDates: [ProviderKind: Date] {
+        Dictionary(uniqueKeysWithValues: ProviderKind.allCases.compactMap { provider in
+            activity.latestModificationDate(for: provider).map { (provider, $0) }
+        })
     }
 
-    /// The CLI owns this account's tokens, so read whatever it has on disk right now and keep
-    /// the vault copy in step. No refresh, no write: the CLI renews its own access token as it
-    /// runs, and claudex must not rotate a refresh token it cannot hand back.
-    private func fetchActive(_ provider: Provider, _ account: Account) async throws -> UsageSnapshot {
-        guard let live = try provider.readCurrentCLICredentials() else {
-            throw ClaudexError.notSignedIn(account.provider)
-        }
-
-        if try store.credentials(for: account) != live {
-            try store.storeCredentials(live, for: account)
-        }
-
-        do {
-            return try await provider.fetchUsage(live)
-        } catch let error as ClaudexError where error.isUnauthorized {
-            throw ClaudexError.unsupportedAccount(
-                "\(account.provider.displayName) token has expired. Run the CLI once to renew it."
+    private var pollCandidates: [UsagePollCandidate] {
+        store.accounts.filter(\.enabled).map { account in
+            let active = store.isActive(account)
+            return UsagePollCandidate(
+                id: account.id,
+                provider: account.provider,
+                isActive: active,
+                order: account.order,
+                configuredInterval: active
+                    ? store.settings.activePollSeconds
+                    : store.settings.idlePollSeconds
             )
         }
     }
 
-    /// claudex owns inactive accounts outright, so refreshing them touches nothing else.
-    private func fetchInactive(_ provider: Provider, _ account: Account) async throws -> UsageSnapshot {
-        guard var credentials = try store.credentials(for: account) else {
-            throw ClaudexError.unsupportedAccount("No stored credentials for \(account.label)")
-        }
-
-        if provider.needsRefresh(credentials, leeway: refreshLeeway) {
-            credentials = try await refreshAndStore(provider, credentials, account)
-        }
-
-        do {
-            return try await provider.fetchUsage(credentials)
-        } catch let error as ClaudexError where error.isUnauthorized {
-            // Rejected earlier than its stated expiry; refresh once and retry.
-            let renewed = try await refreshAndStore(provider, credentials, account)
-            return try await provider.fetchUsage(renewed)
-        }
-    }
-
-    private func refreshAndStore(
-        _ provider: Provider,
-        _ credentials: Credentials,
-        _ account: Account
-    ) async throws -> Credentials {
-        let renewed = try await provider.refresh(credentials)
-        try store.storeCredentials(renewed, for: account)
-        return renewed
-    }
-
-    private func handle(_ error: Error, for account: Account) {
+    private func handle(_ error: Error, for account: Account, candidate: UsagePollCandidate) {
         let count = (failureCount[account.id] ?? 0) + 1
         failureCount[account.id] = count
-
         let message = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
-        store.states[account.id] = .failed(message)
+        lastError = message
+        store.states[account.id] = UsageFailurePolicy.state(after: error, current: store.state(account.id))
 
         let retryable = (error as? ClaudexError)?.isRetryable ?? true
+        let base = max(UsagePollScheduler.minimumInterval, candidate.configuredInterval)
         let delay = retryable
-            ? min(maxBackoff, store.settings.activePollSeconds * pow(2, Double(count)))
+            ? min(maxBackoff, base * pow(2, Double(count)))
             : maxBackoff
-        backoffUntil[account.id] = Date().addingTimeInterval(delay)
+        scheduler.didFail(candidate, retryAt: Date().addingTimeInterval(delay))
     }
 }

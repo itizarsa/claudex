@@ -3,23 +3,23 @@ import Foundation
 public enum Probe {
     /// Exercises the read path against whatever the CLIs are signed into and prints what
     /// claudex parsed. Writes nothing.
-    public static func run() async {
+    public static func run(providers: ProviderRegistry) async {
         for kind in ProviderKind.allCases {
             print("== \(kind.displayName) ==")
-            let provider = Providers.of(kind)
 
             do {
-                guard let credentials = try provider.readCurrentCLICredentials() else {
+                let provider = try providers.provider(for: kind)
+                guard let credentials = try provider.currentCLICredentials() else {
                     print("  not signed in")
                     continue
                 }
                 print("  refresh fingerprint: \(credentials.refreshFingerprint)")
                 print("  needs refresh: \(provider.needsRefresh(credentials, leeway: 300))")
 
-                let identity = try await provider.fetchIdentity(credentials)
+                let identity = try await provider.identity(credentials)
                 print("  identity: \(identity.email) | \(identity.plan) | org \(identity.organization ?? "-") | id \(identity.remoteID)")
 
-                let usage = try await provider.fetchUsage(credentials)
+                let usage = try await provider.usage(credentials)
                 print("  5h:   \(usage.fiveHour.percentText) \(usage.fiveHour.resetText)")
                 print("  week: \(usage.weekly.percentText) \(usage.weekly.resetText)")
             } catch {
@@ -31,35 +31,18 @@ public enum Probe {
 
     /// Round-trips a throwaway item through claudex's own Keychain service. Confirms the
     /// vault works without an authorisation prompt, separately from any CLI-owned item.
-    public static func vaultSelfTest() {
+    public static func vaultSelfTest(store: any CredentialStore) {
         let id = UUID()
         let sample = Credentials.codex(CodexCredentials(
             idToken: "test", accessToken: "test", refreshToken: "test", accountID: "test", lastRefresh: nil
         ))
         do {
-            try Vault.store(sample, for: id)
-            let loaded = try Vault.load(id)
-            try Vault.delete(id)
+            try store.store(sample, for: id)
+            let loaded = try store.load(id)
+            try store.delete(id)
             print("vault: \(loaded == sample ? "ok" : "round-trip mismatch")")
         } catch {
             print("vault: FAILED \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
-        }
-
-        guard Vault.useKeychain else { return }
-        // The migration path only runs for accounts stored before the Keychain became usable,
-        // which no live account may still be in. Exercise it here rather than leave it to be
-        // discovered by the one account that needs it.
-        let migrationID = UUID()
-        do {
-            try FileVault.store(sample, for: migrationID)
-            let loaded = try Vault.load(migrationID)
-            let movedOut = try FileVault.load(migrationID) == nil
-            let movedIn = try KeychainVault.load(migrationID) == sample
-            try Vault.delete(migrationID)
-            let verdict = loaded == sample && movedOut && movedIn
-            print("vault migration: \(verdict ? "ok" : "file entry not moved to Keychain")")
-        } catch {
-            print("vault migration: FAILED \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
         }
     }
 
@@ -67,12 +50,7 @@ public enum Probe {
     /// goes through claudex's own vault, so it also proves Keychain access works for the
     /// binary it is run from.
     @MainActor
-    public static func pollOnce() async {
-        await pollOnce(into: AccountStore())
-    }
-
-    @MainActor
-    public static func pollOnce(into store: AccountStore) async {
+    public static func pollOnce(store: AccountStore, reader: UsageReader) async {
         guard !store.accounts.isEmpty else {
             print("no accounts; run --import first")
             return
@@ -81,21 +59,7 @@ public enum Probe {
             let active = store.isActive(account)
             print("\(account.provider.rawValue) / \(account.label)\(active ? " (active)" : "")")
             do {
-                let provider = Providers.of(account.provider)
-                // Mirrors the engine's rule: the CLI owns the active account's tokens, so read
-                // them live rather than trusting the vault copy.
-                let credentials: Credentials?
-                if active {
-                    credentials = try provider.readCurrentCLICredentials()
-                } else {
-                    credentials = try store.credentials(for: account)
-                }
-                guard let credentials else {
-                    print("  no credentials available")
-                    continue
-                }
-                print("  source: \(active ? "CLI" : "vault"), needs refresh: \(provider.needsRefresh(credentials, leeway: 300))")
-                let usage = try await provider.fetchUsage(credentials)
+                let usage = try await reader.reading(for: account)
                 print("  5h \(usage.fiveHour.percentText)  week \(usage.weekly.percentText)")
                 store.states[account.id] = .ok(usage)
             } catch {
@@ -108,19 +72,23 @@ public enum Probe {
     /// Headless switch, by label. The one path that writes to a CLI's own storage, so it reports
     /// what the CLI reads back afterwards rather than only that the write returned.
     @MainActor
-    public static func switchTo(_ label: String) async {
-        let store = AccountStore()
+    public static func switchTo(
+        _ label: String,
+        store: AccountStore,
+        switcher: any AccountSwitching,
+        providers: ProviderRegistry
+    ) async {
         guard let account = store.accounts.first(where: { $0.label == label }) else {
             print("no account labelled \(label)")
             return
         }
         do {
-            guard try await Switcher.activate(account, in: store) else {
+            guard try await switcher.activate(account) else {
                 print("\(account.label) is already active")
                 return
             }
-            let provider = Providers.of(account.provider)
-            let live = try provider.readCurrentCLICredentials()
+            let provider = try providers.provider(for: account.provider)
+            let live = try provider.currentCLICredentials()
             let matches = live?.refreshFingerprint == (try store.credentials(for: account))?.refreshFingerprint
             print("switched \(account.provider.rawValue) to \(account.label)")
             print("  CLI reads back: \(matches ? "same credentials" : "MISMATCH")")
@@ -133,27 +101,24 @@ public enum Probe {
     /// with those readings and why. Never switches, so the thresholds can be tuned against live
     /// numbers without the tuning itself moving an account.
     @MainActor
-    public static func rotationPlan() async {
-        let store = AccountStore()
+    public static func rotationPlan(store: AccountStore, reader: UsageReader) async {
         guard !store.accounts.isEmpty else {
             print("no accounts; run --import first")
             return
         }
-        await pollOnce(into: store)
+        await pollOnce(store: store, reader: reader)
 
         let now = Date()
         for kind in ProviderKind.allCases where !store.accounts(for: kind).isEmpty {
             let thresholds = store.settings.thresholds(for: kind)
             print("== \(kind.displayName) == thresholds 5h \(Int(thresholds.fiveHour))% / week \(Int(thresholds.weekly))%")
 
-            guard let active = store.activeAccount(for: kind) else {
-                print("  no active account")
+            guard let fleet = store.fleet(for: kind) else {
+                print("  no active account with a usable reading")
                 continue
             }
-            guard let snapshot = store.state(active.id).snapshot else {
-                print("  \(active.label) has no usable reading")
-                continue
-            }
+            let active = fleet.active.account
+            let snapshot = fleet.active.snapshot
             // A poll that failed above leaves the cached reading in place, and a decision made
             // on a stale number is worth knowing about before the thresholds are blamed.
             let age = now.timeIntervalSince(snapshot.fetchedAt)
@@ -161,15 +126,7 @@ public enum Probe {
                 print("  note: \(active.label)'s reading is \(Int(age / 60))m old")
             }
 
-            let candidates = store.accounts(for: kind)
-                .filter { $0.enabled && $0.id != active.id }
-                .compactMap { account in
-                    store.state(account.id).snapshot.map {
-                        RotationCandidate(account: account, snapshot: $0)
-                    }
-                }
-
-            switch Rotator.decide(active: snapshot, candidates: candidates, thresholds: thresholds, now: now) {
+            switch Rotation.decide(fleet: fleet, thresholds: thresholds, lastSwitch: nil, now: now) {
             case .stay:
                 print("  stay on \(active.label) (5h \(snapshot.fiveHour.percentText), week \(snapshot.weekly.percentText))")
             case .blocked(let window):
@@ -188,15 +145,14 @@ public enum Probe {
     /// throwaway directory and adopts whatever it writes there, leaving the account the CLI is
     /// signed into alone.
     @MainActor
-    public static func login(_ name: String) async {
+    public static func login(_ name: String, login: any AccountSigningIn) async {
         guard let kind = ProviderKind(rawValue: name.lowercased()) else {
             print("unknown provider \(name); use claude or codex")
             return
         }
-        let store = AccountStore()
         print("opening the browser for the \(kind.displayName) sign-in…")
         do {
-            let result = try await SandboxedLogin.run(kind, into: store)
+            let result = try await login.run(kind)
             let status = result.wasAlreadyKnown ? "updated" : "added"
             print("\(status) \(result.account.label) (\(result.account.identity.email), \(result.account.identity.plan))")
             print("  not active; run --switch \(result.account.label) to sign the CLI into it")
@@ -206,8 +162,7 @@ public enum Probe {
     }
 
     @MainActor
-    public static func list() {
-        let store = AccountStore()
+    public static func list(store: AccountStore) {
         guard !store.accounts.isEmpty else {
             print("no accounts")
             return

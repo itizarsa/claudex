@@ -1,78 +1,60 @@
 import Foundation
 
-/// Where refresh tokens live.
-///
-/// The Keychain, reached through `/usr/bin/security` rather than the Security framework. The
-/// framework route is unusable from a locally built app: it binds an item's access control to
-/// the calling binary's code signature, an ad-hoc signed build gets a new signature on every
-/// rebuild, so macOS treats each build as a different application and blocks on an authorisation
-/// prompt that a background poll can never answer. `/usr/bin/security` is Apple-signed with a
-/// stable identity and completes the same operations unprompted. See `SecurityCLI`.
-///
-/// `Settings.allowKeychain` switches the whole app back to a 0600 file in its own container,
-/// which is where tokens lived before the subprocess route was found.
-enum Vault {
-    /// Read once at startup, so a single flag decides the store for every call site.
-    static var useKeychain: Bool = Settings.load().allowKeychain
+/// Storage seam for credentials owned by claudex. Production uses the Keychain; tests use the
+/// in-memory adapter, so no test can reach a real account unless it explicitly constructs the
+/// production adapter.
+public protocol CredentialStore: Sendable {
+    func store(_ credentials: Credentials, for id: UUID) throws
+    func load(_ id: UUID) throws -> Credentials?
+    func delete(_ id: UUID) throws
+}
 
-    static func store(_ credentials: Credentials, for id: UUID) throws {
-        if useKeychain {
-            try KeychainVault.store(credentials, for: id)
-        } else {
-            try FileVault.store(credentials, for: id)
-        }
+/// Thread-safe test and ephemeral adapter.
+public final class InMemoryCredentialStore: CredentialStore, @unchecked Sendable {
+    private let lock = NSLock()
+    private var entries: [UUID: Credentials]
+
+    public init(_ entries: [UUID: Credentials] = [:]) {
+        self.entries = entries
     }
 
-    /// Reads fall back to the file store and migrate what they find: accounts stored before the
-    /// Keychain became usable would otherwise read as signed out.
-    static func load(_ id: UUID) throws -> Credentials? {
-        guard useKeychain else { return try FileVault.load(id) }
-        if let stored = try KeychainVault.load(id) { return stored }
-        guard let migrated = try FileVault.load(id) else { return nil }
-        try KeychainVault.store(migrated, for: id)
-        try FileVault.delete(id)
-        return migrated
+    public func store(_ credentials: Credentials, for id: UUID) {
+        lock.withLock { entries[id] = credentials }
     }
 
-    /// Clears both stores whichever is active: a half-migrated account must not leave a live
-    /// token behind in the one currently switched off.
-    static func delete(_ id: UUID) throws {
-        if useKeychain {
-            try KeychainVault.delete(id)
-        }
-        try FileVault.delete(id)
+    public func load(_ id: UUID) -> Credentials? {
+        lock.withLock { entries[id] }
+    }
+
+    public func delete(_ id: UUID) {
+        lock.withLock { entries[id] = nil }
     }
 }
 
-enum FileVault {
-    private static func readAll() throws -> [String: Credentials] {
-        guard let data = try? Data(contentsOf: Paths.vaultFile) else { return [:] }
-        return (try? JSONDecoder.claudex.decode([String: Credentials].self, from: data)) ?? [:]
-    }
+/// Read-only compatibility source for credentials written before Keychain storage became the
+/// only production path. Entries migrate on first read, then disappear from this file.
+struct LegacyFileCredentialSource: Sendable {
+    let url: URL
 
-    private static func writeAll(_ entries: [String: Credentials]) throws {
-        try Paths.ensureSupportDirectory()
-        let data = try JSONEncoder.claudex.encode(entries)
-        try AtomicFile.write(data, to: Paths.vaultFile)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: NSNumber(value: 0o600)],
-            ofItemAtPath: Paths.vaultFile.path
-        )
-    }
-
-    static func store(_ credentials: Credentials, for id: UUID) throws {
-        var entries = try readAll()
-        entries[id.uuidString] = credentials
-        try writeAll(entries)
-    }
-
-    static func load(_ id: UUID) throws -> Credentials? {
+    func load(_ id: UUID) throws -> Credentials? {
         try readAll()[id.uuidString]
     }
 
-    static func delete(_ id: UUID) throws {
+    func delete(_ id: UUID) throws {
         var entries = try readAll()
-        entries[id.uuidString] = nil
-        try writeAll(entries)
+        guard entries.removeValue(forKey: id.uuidString) != nil else { return }
+        if entries.isEmpty {
+            if FileManager.default.fileExists(atPath: url.path) {
+                try FileManager.default.removeItem(at: url)
+            }
+            return
+        }
+        let data = try JSONEncoder.claudex.encode(entries)
+        try AtomicFile.write(data, to: url)
+    }
+
+    private func readAll() throws -> [String: Credentials] {
+        guard let data = try? Data(contentsOf: url) else { return [:] }
+        return try JSONDecoder.claudex.decode([String: Credentials].self, from: data)
     }
 }

@@ -4,8 +4,7 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
-    private let store: AccountStore
-    private let engine: UsageEngine
+    private let state: PanelState
     /// One status item carrying every provider's ring. Active is a per-provider fact — signing a
     /// Claude account in does not change which Codex account is live — so each provider needs
     /// its own ring; but one item per provider would be two click targets opening the same
@@ -14,9 +13,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let popover = NSPopover()
 
     override init() {
-        let store = AccountStore()
-        self.store = store
-        self.engine = UsageEngine(store: store)
+        let providers = ProviderRegistry.live()
+        let store = AccountStore(credentialStore: KeychainCredentialStore())
+        let switcher = Switcher(store: store, providers: providers)
+        let login = SandboxedLogin(store: store, providers: providers, switcher: switcher)
+        let reader = UsageReader(store: store, providers: providers)
+        let notifier = Notifier()
+        let rotator = Rotator(store: store, notifier: notifier, switcher: switcher)
+        let engine = UsageEngine(
+            store: store,
+            activity: LocalUsageActivity(),
+            reader: reader,
+            notifier: notifier,
+            rotator: rotator
+        )
+        self.state = PanelState(store: store, engine: engine, switcher: switcher, login: login)
         super.init()
     }
 
@@ -25,7 +36,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem.button?.action = #selector(togglePopover)
         statusItem.button?.sendAction(on: [.leftMouseUp])
 
-        let controller = NSHostingController(rootView: UsagePopover(store: store, engine: engine))
+        let controller = NSHostingController(rootView: UsagePopover(state: state))
         controller.sizingOptions = [.preferredContentSize]
         // The panel is designed dark-only. Pinning the appearance keeps the tint over the
         // popover's material predictable instead of following the system light theme.
@@ -36,7 +47,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         popover.delegate = self
 
         observeStatusIcon()
-        engine.start()
+        state.engine.start()
     }
 
     @objc private func togglePopover() {
@@ -80,13 +91,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private func updateStatusIcon() {
         guard let button = statusItem.button else { return }
 
-        let populated = ProviderKind.allCases.filter { !store.accounts(for: $0).isEmpty }
-        let entries = populated.map { kind -> MenuBarIcon.Entry in
-            let account = store.activeAccount(for: kind) ?? store.accounts(for: kind).first
-            let snapshot = account.flatMap { store.state($0.id).snapshot }
+        let statusEntries = state.statusEntries
+        let entries = statusEntries.map { entry -> MenuBarIcon.Entry in
             return MenuBarIcon.Entry(
-                alias: account?.badge ?? "-",
-                fiveHour: snapshot?.fiveHour ?? .unknown
+                alias: entry.account?.badge ?? "-",
+                fiveHour: entry.snapshot?.fiveHour ?? .unknown
             )
         }
 
@@ -94,11 +103,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         statusItem.length = MenuBarIcon.width(forRings: drawn.count)
         button.image = MenuBarIcon.rings(drawn)
         button.imagePosition = .imageOnly
-        button.toolTip = populated.isEmpty
+        button.toolTip = statusEntries.isEmpty
             ? "Claudex usage"
-            : populated.map { kind in
-                let account = store.activeAccount(for: kind) ?? store.accounts(for: kind).first
-                return "\(kind.displayName): \(account?.label ?? "no account")"
+            : statusEntries.map { entry in
+                "\(entry.kind.displayName): \(entry.account?.label ?? "no account")"
             }.joined(separator: "\n")
     }
 }

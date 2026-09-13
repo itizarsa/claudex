@@ -9,14 +9,32 @@ private struct PersistedAccounts: Codable {
 @MainActor
 @Observable
 public final class AccountStore {
+    private let credentialStore: any CredentialStore
+    private let persistsMetadata: Bool
     private(set) var accounts: [Account] = []
     /// The account claudex believes each CLI is currently signed into.
     private(set) var active: [ProviderKind: UUID] = [:]
     public var states: [UUID: AccountState] = [:]
     public var settings: Settings = .load()
 
-    public init() {
+    public init(credentialStore: any CredentialStore) {
+        self.credentialStore = credentialStore
+        self.persistsMetadata = true
         load()
+    }
+
+    /// Test composition keeps account metadata and credentials wholly in memory.
+    init(
+        accounts: [Account],
+        active: [ProviderKind: UUID] = [:],
+        settings: Settings = .default,
+        credentialStore: any CredentialStore
+    ) {
+        self.credentialStore = credentialStore
+        self.persistsMetadata = false
+        self.accounts = accounts
+        self.active = active
+        self.settings = settings
     }
 
     // MARK: - Queries
@@ -59,7 +77,7 @@ public final class AccountStore {
     public func add(identity: Identity, kind: ProviderKind, label: String, credentials: Credentials) throws -> Account {
         let nextOrder = (accounts(for: kind).map(\.order).max() ?? -1) + 1
         let account = Account(provider: kind, label: label, identity: identity, order: nextOrder)
-        try Vault.store(credentials, for: account.id)
+        try credentialStore.store(credentials, for: account.id)
         accounts.append(account)
         save()
         return account
@@ -82,7 +100,7 @@ public final class AccountStore {
     }
 
     public func remove(_ account: Account) {
-        try? Vault.delete(account.id)
+        try? credentialStore.delete(account.id)
         accounts.removeAll { $0.id == account.id }
         if active[account.provider] == account.id { active[account.provider] = nil }
         states[account.id] = nil
@@ -95,11 +113,11 @@ public final class AccountStore {
     }
 
     public func credentials(for account: Account) throws -> Credentials? {
-        try Vault.load(account.id)
+        try credentialStore.load(account.id)
     }
 
     public func storeCredentials(_ credentials: Credentials, for account: Account) throws {
-        try Vault.store(credentials, for: account.id)
+        try credentialStore.store(credentials, for: account.id)
     }
 
     // MARK: - Persistence
@@ -114,6 +132,7 @@ public final class AccountStore {
     }
 
     public func save() {
+        guard persistsMetadata else { return }
         let payload = PersistedAccounts(accounts: accounts, active: active)
         guard let data = try? JSONEncoder.claudex.encode(payload) else {
             Log.write("store: could not encode \(accounts.count) account(s)")
@@ -133,6 +152,7 @@ public final class AccountStore {
     /// instead of a dash. They are never used for rotation decisions; `Rotator` requires a
     /// snapshot fetched within the freshness window.
     public func cacheSnapshots() {
+        guard persistsMetadata else { return }
         let payload = states.compactMapValues(\.snapshot)
         guard let data = try? JSONEncoder.claudex.encode(payload) else { return }
         try? Paths.ensureSupportDirectory()

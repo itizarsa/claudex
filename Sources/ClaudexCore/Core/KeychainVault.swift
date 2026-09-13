@@ -1,39 +1,60 @@
 import Foundation
 
-/// One Keychain item per account, keyed by the local account UUID. Tokens never touch
-/// `accounts.json`; that file holds only labels, emails and ordering.
-enum KeychainVault {
-    private static let service = "io.claudex.account"
+protocol CredentialItems: Sendable {
+    func read(account: String) throws -> String?
+    func write(account: String, value: String) throws
+    func delete(account: String) throws
+}
 
-    /// Belt and braces. `Vault` already routes to the file store when the Keychain is switched
-    /// off, so this only catches a future call site that reaches past `Vault`.
-    private static func assertEnabled() throws {
-        guard Vault.useKeychain else {
-            throw ClaudexError.unsupportedAccount("Keychain access is disabled")
-        }
+struct SystemCredentialItems: CredentialItems {
+    private let service = "io.claudex.account"
+
+    func read(account: String) throws -> String? {
+        try KeychainItem.read(service: service, account: account)
     }
 
-    static func store(_ credentials: Credentials, for id: UUID) throws {
-        try assertEnabled()
+    func write(account: String, value: String) throws {
+        try KeychainItem.write(service: service, account: account, value: value)
+    }
+
+    func delete(account: String) throws {
+        _ = try KeychainItem.delete(service: service, account: account)
+    }
+}
+
+/// One Keychain item per account, keyed by the local account UUID. A legacy file is consulted
+/// only when the item is absent, then its entry is moved into the Keychain.
+public struct KeychainCredentialStore: CredentialStore {
+    private let items: any CredentialItems
+    private let legacy: LegacyFileCredentialSource
+
+    public init() {
+        self.init(items: SystemCredentialItems(), legacyURL: Paths.vaultFile)
+    }
+
+    init(items: any CredentialItems, legacyURL: URL) {
+        self.items = items
+        self.legacy = LegacyFileCredentialSource(url: legacyURL)
+    }
+
+    public func store(_ credentials: Credentials, for id: UUID) throws {
         let data = try JSONEncoder.claudex.encode(credentials)
-        try KeychainItem.write(
-            service: service,
-            account: id.uuidString,
-            value: String(decoding: data, as: UTF8.self)
-        )
+        try items.write(account: id.uuidString, value: String(decoding: data, as: UTF8.self))
     }
 
-    static func load(_ id: UUID) throws -> Credentials? {
-        try assertEnabled()
-        guard let value = try KeychainItem.read(service: service, account: id.uuidString) else {
-            return nil
+    public func load(_ id: UUID) throws -> Credentials? {
+        if let value = try items.read(account: id.uuidString) {
+            return try JSONDecoder.claudex.decode(Credentials.self, from: Data(value.utf8))
         }
-        return try JSONDecoder.claudex.decode(Credentials.self, from: Data(value.utf8))
+        guard let migrated = try legacy.load(id) else { return nil }
+        try store(migrated, for: id)
+        try legacy.delete(id)
+        return migrated
     }
 
-    static func delete(_ id: UUID) throws {
-        try assertEnabled()
-        try KeychainItem.delete(service: service, account: id.uuidString)
+    public func delete(_ id: UUID) throws {
+        try items.delete(account: id.uuidString)
+        try legacy.delete(id)
     }
 }
 
@@ -51,7 +72,6 @@ enum ClaudeCLIKeychain {
     /// A sign-in run against a throwaway `CLAUDE_CONFIG_DIR` lands in its own item, so the
     /// service name is a parameter rather than the constant above.
     static func readRaw(service: String) throws -> Data? {
-        guard Vault.useKeychain else { return nil }
         let output = try SecurityCLI.run(["find-generic-password", "-s", service, "-a", account, "-w"])
         if output.exitCode == SecurityCLI.itemNotFound { return nil }
         guard output.exitCode == 0 else {
@@ -83,7 +103,6 @@ enum ClaudeCLIKeychain {
     }
 
     static func delete(service: String) throws {
-        guard Vault.useKeychain else { return }
         _ = try SecurityCLI.run(["delete-generic-password", "-s", service, "-a", account])
     }
 
@@ -93,9 +112,6 @@ enum ClaudeCLIKeychain {
     /// same token is already readable in `~/.claude/.credentials.json` by any process running as
     /// this user, so this widens the window rather than the audience.
     static func writeRaw(_ data: Data) throws {
-        guard Vault.useKeychain else {
-            throw ClaudexError.unsupportedAccount("Keychain access is disabled")
-        }
         let output = try SecurityCLI.run([
             "add-generic-password", "-U", "-s", service, "-a", account,
             "-w", String(decoding: data, as: UTF8.self),

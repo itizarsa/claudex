@@ -15,7 +15,9 @@ enum Paths {
     // CLI state we read, and (for the active account only) mirror refreshed tokens back to.
     static var claudeCredentials: URL { home.appending(path: ".claude/.credentials.json") }
     static var claudeConfig: URL { home.appending(path: ".claude.json") }
+    static var claudeProjects: URL { home.appending(path: ".claude/projects", directoryHint: .isDirectory) }
     static var codexAuth: URL { home.appending(path: ".codex/auth.json") }
+    static var codexSessions: URL { home.appending(path: ".codex/sessions", directoryHint: .isDirectory) }
 
     static func ensureSupportDirectory() throws {
         try FileManager.default.createDirectory(at: support, withIntermediateDirectories: true)

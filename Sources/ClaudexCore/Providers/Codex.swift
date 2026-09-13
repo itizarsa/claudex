@@ -1,22 +1,16 @@
 import Foundation
 
-struct CodexProvider: Provider {
-    let kind: ProviderKind = .codex
-
-    private func credentials(_ credentials: Credentials) throws -> CodexCredentials {
-        guard case .codex(let value) = credentials else {
-            throw ClaudexError.unsupportedAccount("Expected Codex credentials")
-        }
-        return value
-    }
+/// ChatGPT's rate-limit endpoint, the identity carried in the id token, and the OAuth refresh
+/// behind both.
+public struct CodexAPI: UsageAPI {
+    public init() {}
 
     // MARK: - Usage
 
-    func fetchUsage(_ input: Credentials) async throws -> UsageSnapshot {
-        let creds = try credentials(input)
+    public func usage(_ credential: CodexCredentials) async throws -> UsageSnapshot {
         let response = try await HTTP.get(Endpoints.Codex.usage, headers: [
-            "Authorization": "Bearer \(creds.accessToken)",
-            "chatgpt-account-id": creds.accountID,
+            "Authorization": "Bearer \(credential.accessToken)",
+            "chatgpt-account-id": credential.accountID,
             "Accept": "application/json",
         ])
 
@@ -48,15 +42,14 @@ struct CodexProvider: Provider {
 
     // MARK: - Identity
 
-    func fetchIdentity(_ input: Credentials) async throws -> Identity {
-        let creds = try credentials(input)
-        let claims = try JWT.claims(creds.idToken)
+    public func identity(_ credential: CodexCredentials) async throws -> Identity {
+        let claims = try JWT.claims(credential.idToken)
         let auth = claims["https://api.openai.com/auth"]
 
         guard let email = claims["email"].string else {
             throw ClaudexError.decoding("id_token has no email claim")
         }
-        let accountID = auth["chatgpt_account_id"].string ?? creds.accountID
+        let accountID = auth["chatgpt_account_id"].string ?? credential.accountID
         let plan = auth["chatgpt_plan_type"].string ?? "unknown"
 
         guard plan.lowercased() != "free" else {
@@ -77,23 +70,21 @@ struct CodexProvider: Provider {
 
     // MARK: - Refresh
 
-    func needsRefresh(_ input: Credentials, leeway: TimeInterval) -> Bool {
-        guard let creds = try? credentials(input) else { return false }
-        guard let claims = try? JWT.claims(creds.accessToken), let expiry = claims["exp"].double else {
+    public func needsRefresh(_ credential: CodexCredentials, leeway: TimeInterval) -> Bool {
+        guard let claims = try? JWT.claims(credential.accessToken), let expiry = claims["exp"].double else {
             // No readable expiry, so fall back to the CLI's own convention of refreshing
             // roughly every eight hours.
-            guard let last = creds.lastRefresh else { return true }
+            guard let last = credential.lastRefresh else { return true }
             return Date().timeIntervalSince(last) > 8 * 3600
         }
         return Date(timeIntervalSince1970: expiry).timeIntervalSinceNow < leeway
     }
 
-    func refresh(_ input: Credentials) async throws -> Credentials {
-        let creds = try credentials(input)
+    public func refreshed(_ credential: CodexCredentials) async throws -> CodexCredentials {
         let response = try await HTTP.postJSON(Endpoints.Codex.token, body: [
             "client_id": Endpoints.Codex.clientID,
             "grant_type": "refresh_token",
-            "refresh_token": creds.refreshToken,
+            "refresh_token": credential.refreshToken,
             "scope": "openid profile email",
         ])
 
@@ -102,24 +93,25 @@ struct CodexProvider: Provider {
             throw ClaudexError.decoding("refresh response missing access_token")
         }
 
-        var updated = creds
+        var updated = credential
         updated.accessToken = accessToken
         if let idToken = json["id_token"].string { updated.idToken = idToken }
         if let rotated = json["refresh_token"].string { updated.refreshToken = rotated }
         updated.lastRefresh = Date()
-        return .codex(updated)
+        return updated
     }
+}
 
-    // MARK: - CLI state
+/// The Codex CLI's own credential store: `auth.json` under `~/.codex`.
+public struct CodexCLI: CLISession {
+    public init() {}
 
-    func readCurrentCLICredentials() throws -> Credentials? {
+    public func current() throws -> CodexCredentials? {
         guard let data = try? Data(contentsOf: Paths.codexAuth) else { return nil }
-        return try Self.parse(data)
+        return try parse(data)
     }
 
-    /// The shape of `auth.json`, wherever it was read from: the CLI's own `~/.codex`, or the
-    /// throwaway `CODEX_HOME` a sandboxed sign-in writes.
-    static func parse(_ data: Data) throws -> Credentials? {
+    public func parse(_ data: Data) throws -> CodexCredentials? {
         let json = try JSONView.parse(data)
 
         guard json["auth_mode"].string == "chatgpt" else {
@@ -132,18 +124,16 @@ struct CodexProvider: Provider {
               let refreshToken = tokens["refresh_token"].string
         else { return nil }
 
-        return .codex(CodexCredentials(
+        return CodexCredentials(
             idToken: idToken,
             accessToken: accessToken,
             refreshToken: refreshToken,
             accountID: tokens["account_id"].string ?? "",
             lastRefresh: json["last_refresh"].date
-        ))
+        )
     }
 
-    func activate(_ input: Credentials, identity: Identity) throws {
-        let creds = try credentials(input)
-
+    public func activate(_ credential: CodexCredentials, identity: Identity) throws {
         var root: [String: Any] = [:]
         if let existing = try? Data(contentsOf: Paths.codexAuth),
            let object = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
@@ -153,12 +143,12 @@ struct CodexProvider: Provider {
         root["auth_mode"] = "chatgpt"
         root["OPENAI_API_KEY"] = NSNull()
         root["tokens"] = [
-            "id_token": creds.idToken,
-            "access_token": creds.accessToken,
-            "refresh_token": creds.refreshToken,
-            "account_id": creds.accountID.isEmpty ? identity.remoteID : creds.accountID,
+            "id_token": credential.idToken,
+            "access_token": credential.accessToken,
+            "refresh_token": credential.refreshToken,
+            "account_id": credential.accountID.isEmpty ? identity.remoteID : credential.accountID,
         ]
-        root["last_refresh"] = ISO8601.string(from: creds.lastRefresh ?? Date())
+        root["last_refresh"] = ISO8601.string(from: credential.lastRefresh ?? Date())
 
         let data = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
         try AtomicFile.backup(Paths.codexAuth)

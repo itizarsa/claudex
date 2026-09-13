@@ -2,24 +2,19 @@ import ClaudexCore
 import SwiftUI
 
 struct UsagePopover: View {
-    @Bindable var store: AccountStore
-    let engine: UsageEngine
-    @State private var notice: String?
-    @State private var switchingAccount: UUID?
-    @State private var showingSettings = false
-    @State private var signingIn: ProviderKind?
+    @Bindable var state: PanelState
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            if showingSettings {
-                SettingsPanel(store: store) { showingSettings = false }
+            if state.showingSettings {
+                SettingsPanel(state: state)
             } else {
                 ForEach(ProviderKind.allCases, id: \.self) { kind in
                     section(kind)
                 }
             }
 
-            if let notice {
+            if let notice = state.notice {
                 Text(notice)
                     .font(Theme.caption)
                     .foregroundStyle(Theme.secondaryText)
@@ -34,13 +29,16 @@ struct UsagePopover: View {
         .frame(width: Theme.popoverWidth)
         .background(Theme.popoverTint)
         .background(VisualEffectBackground())
-        .animation(Theme.transition, value: showingSettings)
+        .animation(Theme.transition, value: state.showingSettings)
     }
 
     // MARK: - Sections
 
     private func section(_ kind: ProviderKind) -> some View {
-        let accounts = store.accounts(for: kind)
+        // The live account sits at the top, because it is the one reading a person opens the
+        // panel for; the rest keep their stored order under it. Sorted here rather than in the
+        // store, where `order` is the rotation order and must not move when the CLI switches.
+        let accounts = state.accounts(for: kind)
 
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
@@ -56,36 +54,37 @@ struct UsagePopover: View {
                     size: 26,
                     glyphSize: 11
                 ) {
-                    signIn(kind)
+                    state.signIn(kind)
                 }
-                .disabled(isBusy)
+                .disabled(state.isBusy)
             }
             .padding(.leading, 2)
 
             if accounts.isEmpty {
-                EmptyProviderCard(kind: kind, busy: signingIn == kind, onSignIn: { signIn(kind) })
+                EmptyProviderCard(kind: kind, busy: state.signingIn == kind, onSignIn: { state.signIn(kind) })
             } else {
                 VStack(spacing: 6) {
                     ForEach(accounts) { account in
                         AccountCard(
                             account: account,
-                            state: store.state(account.id),
-                            isActive: store.isActive(account),
-                            showsActiveTag: accounts.count > 1,
-                            isRefreshing: engine.isPolling(account.id),
-                            isSwitching: switchingAccount == account.id,
-                            canSwitch: accounts.count > 1 && switchingAccount == nil,
-                            onAliasChange: { store.setAlias($0, for: account) },
-                            onActivate: { activate(account) }
+                            state: state.accountState(account),
+                            isActive: state.isActive(account),
+                            showsActiveMark: accounts.count > 1,
+                            isRefreshing: state.isPolling(account),
+                            isSwitching: state.switchingAccount == account.id,
+                            canSwitch: accounts.count > 1 && state.switchingAccount == nil,
+                            onAliasChange: { state.setAlias($0, for: account) },
+                            onActivate: { state.activate(account) }
                         )
                         .contextMenu {
-                            if !store.isActive(account) {
-                                Button("Sign the CLI into \(account.label)") { activate(account) }
+                            if !state.isActive(account) {
+                                Button("Sign the CLI into \(account.label)") { state.activate(account) }
                             }
-                            Button("Remove \(account.label)", role: .destructive) { store.remove(account) }
+                            Button("Remove \(account.label)", role: .destructive) { state.remove(account) }
                         }
                     }
                 }
+                .animation(Theme.transition, value: accounts.first(where: { state.isActive($0) })?.id)
             }
         }
     }
@@ -95,70 +94,21 @@ struct UsagePopover: View {
             Divider().overlay(Theme.hairline)
             HStack(spacing: 0) {
                 TextButton(title: "Refresh") {
-                    notice = nil
-                    engine.refreshAll()
+                    state.refresh()
                 }
                 Spacer()
                 IconButton(
                     systemName: "gearshape",
-                    help: showingSettings ? "Back to accounts" : "Thresholds, notifications, startup"
+                    help: state.showingSettings ? "Back to accounts" : "Thresholds, notifications, startup"
                 ) {
-                    notice = nil
-                    showingSettings.toggle()
+                    state.toggleSettings()
                 }
                 Spacer()
-                TextButton(title: "Quit") { NSApplication.shared.terminate(nil) }
+                TextButton(title: "Quit") { state.quit() }
             }
         }
     }
 
-    // MARK: - Actions
-
-    /// Signing the CLI into another account rotates tokens on both sides of the swap, so the
-    /// snapshot for every account of that provider is stale the moment it succeeds. Refreshing
-    /// the provider rather than the one card is what keeps the panel honest.
-    private func activate(_ account: Account) {
-        guard !store.isActive(account), switchingAccount == nil else { return }
-        switchingAccount = account.id
-        notice = nil
-        Task {
-            defer { switchingAccount = nil }
-            do {
-                try await Switcher.activate(account, in: store)
-                // A choice made by hand outranks the rule, and starts the cooldown afresh so
-                // the rotator does not undo it on the next poll.
-                engine.rotator.noteManualSwitch(account.provider)
-                engine.refreshAll()
-            } catch {
-                notice = ErrorPresenter.message(error)
-            }
-        }
-    }
-
-    private var isBusy: Bool { signingIn != nil }
-
-    /// The CLI's own login runs hidden against a throwaway config directory and opens the
-    /// browser itself, so the account currently signed in is untouched and claudex owns no OAuth
-    /// code. The new account is added inactive: adding is not a request to switch.
-    private func signIn(_ kind: ProviderKind) {
-        guard !isBusy else { return }
-        signingIn = kind
-        notice = "Finish the sign-in in your browser. Claudex is waiting for it."
-        Task {
-            defer { signingIn = nil }
-            do {
-                let result = try await SandboxedLogin.run(kind, into: store)
-                Log.write("panel: sign-in returned \(result.account.label), already known \(result.wasAlreadyKnown)")
-                notice = result.wasAlreadyKnown
-                    ? "\(result.account.label) was already tracked. Its credentials are up to date."
-                    : "Added \(result.account.label). It is not active — switch to it when you want it."
-                engine.refreshAll()
-            } catch {
-                Log.write("panel: sign-in failed — \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
-                notice = ErrorPresenter.message(error)
-            }
-        }
-    }
 }
 
 // MARK: - Account card
@@ -169,7 +119,9 @@ struct AccountCard: View {
     let account: Account
     let state: AccountState
     let isActive: Bool
-    let showsActiveTag: Bool
+    /// False for the only account of a provider: with nothing to switch to, marking one card
+    /// as the live one says nothing.
+    let showsActiveMark: Bool
     let isRefreshing: Bool
     let isSwitching: Bool
     /// False for the only account of a provider, where there is nothing to switch to, and while
@@ -217,7 +169,18 @@ struct AccountCard: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(Theme.cardStroke, lineWidth: Theme.cardStrokeWidth)
         )
-        // Every account is drawn at full strength: the Active tag says which one is live, and
+        // The live account is marked at the card's edge rather than by a tag in the header.
+        // A rail is read as a property of the whole card, which is what being signed in is,
+        // and it leaves the header's one tag slot free for the switch.
+        .overlay(alignment: .leading) {
+            if showsActiveMark && isActive {
+                Rectangle()
+                    .fill(Theme.accent)
+                    .frame(width: Theme.activeRailWidth)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        // Every account is drawn at full strength: the rail says which one is live, and
         // dimming the others made a two-account panel look half broken. A poll in flight dims
         // the card it is updating, which is cheaper to look at than a teardown.
         .opacity(isRefreshing || isSwitching ? 0.62 : 1)
@@ -233,15 +196,24 @@ struct AccountCard: View {
     private var header: some View {
         HStack(spacing: 8) {
             aliasControl
-            // Two lines rather than one run of text: the organisation is the name of the
-            // account, and the plan and the email below it are the fine print that says
-            // which seat it is. On one line they competed for the same weight.
+            // Two lines rather than one run of text: the person names the seat, and the plan
+            // and email below are the fine print saying which seat it is. On one line they
+            // competed for the same weight.
             VStack(alignment: .leading, spacing: 1) {
-                Text(account.label)
-                    .font(Theme.accountName)
-                    .foregroundStyle(Theme.primaryText)
-                    .lineLimit(1)
-                    .truncationMode(.tail)
+                HStack(spacing: 4) {
+                    Text(account.label)
+                        .font(Theme.accountName)
+                        .foregroundStyle(Theme.primaryText)
+                        .lineLimit(1)
+                        .layoutPriority(1)
+                    // The organisation trails the name rather than leading it, so every card's
+                    // name starts at the same place and the column scans as a list of people.
+                    // It also truncates first: a clipped organisation still says which seat
+                    // this is, a clipped name does not.
+                    if let organization = account.identity.organizationTag {
+                        Chip(text: organization)
+                    }
+                }
                 Text(subtitle)
                     .font(Theme.caption)
                     .foregroundStyle(Theme.tertiaryText)
@@ -249,12 +221,11 @@ struct AccountCard: View {
                     .truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            // One slot, three readings: where the account is live, that it is being made live,
-            // or — under the pointer — that it can be.
+            // Which account is live is said by the rail down the card's edge, not by a tag, so
+            // this slot never holds two labels at once. What is left is the one thing that is
+            // an action: switching, in progress or on offer.
             if isSwitching {
                 Tag(text: "Switching…")
-            } else if showsActiveTag && isActive {
-                Tag(text: "Active")
             } else if isSwitchable && hovering {
                 Tag(text: "Switch")
             }
@@ -317,6 +288,27 @@ struct AliasBadge: View {
             .frame(width: Theme.aliasBadgeSize, height: Theme.aliasBadgeSize)
             .background(
                 Circle().fill(filled ? Theme.accent.opacity(0.15) : Color.primary.opacity(0.06))
+            )
+    }
+}
+
+/// The organisation beside an account's name. Deliberately unlike `Tag`: greyed and square
+/// where the tag is accented and capsuled, because one is a fact about the seat and the other
+/// is an action offered on it.
+struct Chip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(Theme.chip)
+            .foregroundStyle(Theme.secondaryText)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 1)
+            .background(
+                RoundedRectangle(cornerRadius: 3, style: .continuous)
+                    .fill(Color.primary.opacity(0.07))
             )
     }
 }
@@ -389,18 +381,18 @@ struct UsageBar: View {
                 if window.percent != nil {
                     Capsule(style: .continuous)
                         .fill(window.severity.tone)
-                        .frame(width: max(window.fraction > 0 ? height : 0, width * window.fraction))
+                        .frame(width: width * window.fraction)
                         .animation(.easeInOut(duration: 0.6), value: window.fraction)
                 }
 
                 if let elapsed = window.elapsed {
-                    // Proud of the bar on both sides, the same way the menu-bar notch crosses
-                    // the ring, so the two readings of elapsed time look like one idea. Tinted
-                    // by pace: position says how much time is gone, colour says whether the
-                    // spend rate will survive it.
-                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                    // Inside the bar rather than proud of it: the row reads as one hairline,
+                    // and anything standing above it made the filled bar look twice its height.
+                    // Tinted by pace: position says how much time is gone, colour says whether
+                    // the spend rate will survive it.
+                    Rectangle()
                         .fill(window.pace?.tone ?? Theme.primaryText)
-                        .frame(width: Theme.barMarkerWidth, height: height + 4)
+                        .frame(width: Theme.barMarkerWidth, height: height)
                         .offset(x: min(width - Theme.barMarkerWidth,
                                        max(0, round(width * elapsed) - Theme.barMarkerWidth / 2)))
                 }

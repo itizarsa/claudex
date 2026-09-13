@@ -16,20 +16,14 @@ public struct Settings: Codable, Equatable, Sendable {
     /// Switch and exhaustion notices. Off silences the rotator without stopping it, so an
     /// automatic switch still happens; it just happens quietly.
     public var notificationsEnabled: Bool = true
-    /// Master switch for every Keychain call in the app. On, because claudex reaches the
-    /// Keychain through `/usr/bin/security`, which is Apple-signed and so raises none of the
-    /// authorisation prompts that in-process `SecItem` calls do from an ad-hoc signed build.
-    /// Off falls back to a 0600 file in the app's container. See `Vault`.
-    public var allowKeychain: Bool = true
 
     public static let `default` = Settings(
         thresholds: [.claude: .default, .codex: .default],
-        activePollSeconds: 60,
+        activePollSeconds: 300,
         idlePollSeconds: 300,
         autoSwitchEnabled: false,
         showLabelInMenuBar: false,
-        notificationsEnabled: true,
-        allowKeychain: true
+        notificationsEnabled: true
     )
 
     public func thresholds(for kind: ProviderKind) -> ProviderThresholds {
@@ -38,8 +32,12 @@ public struct Settings: Codable, Equatable, Sendable {
 
     public static func load() -> Settings {
         guard let data = try? Data(contentsOf: Paths.settingsFile),
-              let decoded = try? JSONDecoder.claudex.decode(Settings.self, from: data)
+              var decoded = try? JSONDecoder.claudex.decode(Settings.self, from: data)
         else { return .default }
+        // Older releases offered 30, 60 and 120 seconds. Keep those files valid while moving
+        // them onto the request floor enforced by the polling scheduler.
+        decoded.activePollSeconds = max(UsagePollScheduler.minimumInterval, decoded.activePollSeconds)
+        decoded.idlePollSeconds = max(UsagePollScheduler.minimumInterval, decoded.idlePollSeconds)
         return decoded
     }
 

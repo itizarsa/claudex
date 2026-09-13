@@ -1,14 +1,8 @@
 import Foundation
 
-struct ClaudeProvider: Provider {
-    let kind: ProviderKind = .claude
-
-    private func credentials(_ credentials: Credentials) throws -> ClaudeCredentials {
-        guard case .claude(let value) = credentials else {
-            throw ClaudexError.unsupportedAccount("Expected Claude credentials")
-        }
-        return value
-    }
+/// claude.ai's usage and profile endpoints, and the OAuth refresh behind them.
+public struct ClaudeAPI: UsageAPI {
+    public init() {}
 
     private func headers(_ token: String) -> [String: String] {
         [
@@ -20,9 +14,8 @@ struct ClaudeProvider: Provider {
 
     // MARK: - Usage
 
-    func fetchUsage(_ input: Credentials) async throws -> UsageSnapshot {
-        let creds = try credentials(input)
-        let response = try await HTTP.get(Endpoints.Claude.usage, headers: headers(creds.accessToken))
+    public func usage(_ credential: ClaudeCredentials) async throws -> UsageSnapshot {
+        let response = try await HTTP.get(Endpoints.Claude.usage, headers: headers(credential.accessToken))
         let json = response.json
 
         // The endpoint names the windows but never states their length, so the durations the
@@ -47,13 +40,12 @@ struct ClaudeProvider: Provider {
 
     // MARK: - Identity
 
-    func fetchIdentity(_ input: Credentials) async throws -> Identity {
-        let creds = try credentials(input)
-        guard !creds.accessToken.hasPrefix("sk-ant-api") else {
+    public func identity(_ credential: ClaudeCredentials) async throws -> Identity {
+        guard !credential.accessToken.hasPrefix("sk-ant-api") else {
             throw ClaudexError.unsupportedAccount("API keys are not supported; sign in with a claude.ai subscription")
         }
 
-        let response = try await HTTP.get(Endpoints.Claude.profile, headers: headers(creds.accessToken))
+        let response = try await HTTP.get(Endpoints.Claude.profile, headers: headers(credential.accessToken))
         let json = response.json
         let account = json["account"]
         let organization = json["organization"]
@@ -92,16 +84,14 @@ struct ClaudeProvider: Provider {
 
     // MARK: - Refresh
 
-    func needsRefresh(_ input: Credentials, leeway: TimeInterval) -> Bool {
-        guard let creds = try? credentials(input) else { return false }
-        return creds.expiryDate.timeIntervalSinceNow < leeway
+    public func needsRefresh(_ credential: ClaudeCredentials, leeway: TimeInterval) -> Bool {
+        credential.expiryDate.timeIntervalSinceNow < leeway
     }
 
-    func refresh(_ input: Credentials) async throws -> Credentials {
-        let creds = try credentials(input)
+    public func refreshed(_ credential: ClaudeCredentials) async throws -> ClaudeCredentials {
         let body: [String: Any] = [
             "grant_type": "refresh_token",
-            "refresh_token": creds.refreshToken,
+            "refresh_token": credential.refreshToken,
             "client_id": Endpoints.Claude.clientID,
         ]
 
@@ -117,7 +107,7 @@ struct ClaudeProvider: Provider {
             throw ClaudexError.decoding("refresh response missing access_token")
         }
 
-        var updated = creds
+        var updated = credential
         updated.accessToken = accessToken
         // The refresh token rotates. Keeping the old one would eventually lock the account out.
         if let rotated = json["refresh_token"].string { updated.refreshToken = rotated }
@@ -127,37 +117,37 @@ struct ClaudeProvider: Provider {
         if let scope = json["scope"].string {
             updated.scopes = scope.split(separator: " ").map(String.init)
         }
-        return .claude(updated)
+        return updated
     }
+}
 
-    // MARK: - CLI state
+/// Claude Code's own credential store: `~/.claude/.credentials.json`, its Keychain twin, and
+/// the identity block in `~/.claude.json`.
+public struct ClaudeCLI: CLISession {
+    public init() {}
 
-    func readCurrentCLICredentials() throws -> Credentials? {
-        // The file is read first on purpose. Reading Claude Code's own Keychain item from a
-        // different binary triggers a GUI authorisation prompt, which blocks indefinitely in
-        // any process that cannot show one. The two stores are written together and carry the
-        // same bytes, so the file is an equivalent and prompt-free source.
+    public func current() throws -> ClaudeCredentials? {
+        // The file is read first because Claude Code does the same. Both stores carry the same
+        // bytes; the Keychain remains the fallback when the file is absent.
         let data: Data
         if let file = try? Data(contentsOf: Paths.claudeCredentials) {
             data = file
-        } else if Vault.useKeychain, let keychain = try ClaudeCLIKeychain.readRaw() {
+        } else if let keychain = try ClaudeCLIKeychain.readRaw() {
             data = keychain
         } else {
             return nil
         }
 
-        return try Self.parse(data)
+        return try parse(data)
     }
 
-    /// The shape of Claude Code's credential store, wherever it was read from: the CLI's own
-    /// file, its Keychain item, or the throwaway config directory a sandboxed sign-in writes.
-    static func parse(_ data: Data) throws -> Credentials? {
+    public func parse(_ data: Data) throws -> ClaudeCredentials? {
         let json = try JSONView.parse(data)["claudeAiOauth"]
         guard let accessToken = json["accessToken"].string,
               let refreshToken = json["refreshToken"].string
         else { return nil }
 
-        return .claude(ClaudeCredentials(
+        return ClaudeCredentials(
             accessToken: accessToken,
             refreshToken: refreshToken,
             expiresAt: Int64(json["expiresAt"].double ?? 0),
@@ -165,12 +155,10 @@ struct ClaudeProvider: Provider {
             scopes: json["scopes"].array.compactMap(\.string),
             subscriptionType: json["subscriptionType"].string,
             rateLimitTier: json["rateLimitTier"].string
-        ))
+        )
     }
 
-    func activate(_ input: Credentials, identity: Identity) throws {
-        let creds = try credentials(input)
-
+    public func activate(_ credential: ClaudeCredentials, identity: Identity) throws {
         // Preserve everything else in the file, notably the mcpOAuth block, by editing the
         // decoded object rather than writing a fresh one.
         var root: [String: Any] = [:]
@@ -180,14 +168,14 @@ struct ClaudeProvider: Provider {
         }
 
         var oauth: [String: Any] = [
-            "accessToken": creds.accessToken,
-            "refreshToken": creds.refreshToken,
-            "expiresAt": creds.expiresAt,
-            "scopes": creds.scopes,
+            "accessToken": credential.accessToken,
+            "refreshToken": credential.refreshToken,
+            "expiresAt": credential.expiresAt,
+            "scopes": credential.scopes,
         ]
-        if let value = creds.refreshTokenExpiresAt { oauth["refreshTokenExpiresAt"] = value }
-        if let value = creds.subscriptionType { oauth["subscriptionType"] = value }
-        if let value = creds.rateLimitTier { oauth["rateLimitTier"] = value }
+        if let value = credential.refreshTokenExpiresAt { oauth["refreshTokenExpiresAt"] = value }
+        if let value = credential.subscriptionType { oauth["subscriptionType"] = value }
+        if let value = credential.rateLimitTier { oauth["rateLimitTier"] = value }
         root["claudeAiOauth"] = oauth
 
         let data = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
@@ -195,29 +183,24 @@ struct ClaudeProvider: Provider {
         try AtomicFile.backup(Paths.claudeCredentials)
         try AtomicFile.write(data, to: Paths.claudeCredentials)
 
-        // Claude Code keeps the same bytes in a Keychain item, and ideally both stores would
-        // be updated together. Writing another application's Keychain item always raises an
-        // authorisation prompt, which this app must never do from a background poll, so the
-        // write only happens when the Keychain has been explicitly enabled. If the Keychain
-        // write fails after the file write succeeded, the file is restored first.
-        if Vault.useKeychain {
-            do {
-                try ClaudeCLIKeychain.writeRaw(data)
-            } catch {
-                let backup = Paths.claudeCredentials.appendingPathExtension("claudex-backup")
-                if let previous = try? Data(contentsOf: backup) {
-                    try? AtomicFile.write(previous, to: Paths.claudeCredentials)
-                }
-                throw error
+        // Claude Code keeps the same bytes in a Keychain item. If that write fails after the
+        // file write succeeds, restore the previous file so its two sources cannot disagree.
+        do {
+            try ClaudeCLIKeychain.writeRaw(data)
+        } catch {
+            let backup = Paths.claudeCredentials.appendingPathExtension("claudex-backup")
+            if let previous = try? Data(contentsOf: backup) {
+                try? AtomicFile.write(previous, to: Paths.claudeCredentials)
             }
+            throw error
         }
 
-        updateClaudeConfigIdentity(identity)
+        updateConfigIdentity(identity)
     }
 
     /// Keep `~/.claude.json`'s `oauthAccount` in step so the CLI does not display a stale
     /// identity. Best effort: a failure here is cosmetic, not a sign-in problem.
-    private func updateClaudeConfigIdentity(_ identity: Identity) {
+    private func updateConfigIdentity(_ identity: Identity) {
         guard let data = try? Data(contentsOf: Paths.claudeConfig),
               var root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return }

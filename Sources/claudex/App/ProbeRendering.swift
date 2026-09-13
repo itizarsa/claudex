@@ -27,12 +27,26 @@ extension Probe {
     /// cannot disagree.
     @MainActor
     static func renderPanel(path: String) {
-        let store = AccountStore()
+        let providers = ProviderRegistry.live()
+        let store = AccountStore(credentialStore: KeychainCredentialStore())
+        let switcher = Switcher(store: store, providers: providers)
+        let login = SandboxedLogin(store: store, providers: providers, switcher: switcher)
+        let reader = UsageReader(store: store, providers: providers)
+        let notifier = Notifier()
+        let rotator = Rotator(store: store, notifier: notifier, switcher: switcher)
+        let engine = UsageEngine(
+            store: store,
+            activity: LocalUsageActivity(),
+            reader: reader,
+            notifier: notifier,
+            rotator: rotator
+        )
+        let state = PanelState(store: store, engine: engine, switcher: switcher, login: login)
         // AppKit needs its application object before a view can be laid out, and the panel is
         // laid out here on the real main thread rather than on the main queue: under
         // `dispatchMain()` the two are not the same thread.
         _ = NSApplication.shared
-        let view = NSHostingView(rootView: UsagePopover(store: store, engine: UsageEngine(store: store)))
+        let view = NSHostingView(rootView: UsagePopover(state: state))
         view.appearance = NSAppearance(named: .darkAqua)
         view.frame = NSRect(origin: .zero, size: view.fittingSize)
         view.layoutSubtreeIfNeeded()

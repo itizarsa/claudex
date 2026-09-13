@@ -6,8 +6,7 @@ import SwiftUI
 /// because everything here is one or two controls per line and a separate window for that is a
 /// second thing to find and close.
 struct SettingsPanel: View {
-    @Bindable var store: AccountStore
-    let onClose: () -> Void
+    @Bindable var state: PanelState
 
     @State private var launchAtLogin = LaunchAtLogin.isEnabled
     @State private var notice: String?
@@ -32,10 +31,10 @@ struct SettingsPanel: View {
                         kind: kind,
                         fiveHour: threshold(kind, \.fiveHour),
                         weekly: threshold(kind, \.weekly),
-                        onCommit: { store.settings.save() }
+                        onCommit: { state.saveSettings() }
                     )
-                    .disabled(!store.settings.autoSwitchEnabled)
-                    .opacity(store.settings.autoSwitchEnabled ? 1 : 0.45)
+                    .disabled(!state.settings.autoSwitchEnabled)
+                    .opacity(state.settings.autoSwitchEnabled ? 1 : 0.45)
                 }
             }
 
@@ -52,7 +51,7 @@ struct SettingsPanel: View {
             }
 
             group("Polling") {
-                IntervalRow(title: "Active account", seconds: setting(\.activePollSeconds), choices: [30, 60, 120, 300])
+                IntervalRow(title: "Active account minimum", seconds: setting(\.activePollSeconds), choices: [300, 600, 900, 1800])
                 IntervalRow(title: "Other accounts", seconds: setting(\.idlePollSeconds), choices: [300, 600, 900, 1800])
             }
 
@@ -88,7 +87,7 @@ struct SettingsPanel: View {
                 .tracking(0.6)
                 .foregroundStyle(Theme.secondaryText)
             Spacer()
-            IconButton(systemName: "chevron.left", help: "Back to accounts", action: onClose)
+            IconButton(systemName: "chevron.left", help: "Back to accounts", action: state.closeSettings)
         }
         .padding(.leading, 2)
     }
@@ -118,8 +117,8 @@ struct SettingsPanel: View {
     /// Toggles and pickers commit one value at a time, so each write is also a save.
     private func setting<Value>(_ keyPath: WritableKeyPath<ClaudexCore.Settings, Value>) -> Binding<Value> {
         Binding(
-            get: { store.settings[keyPath: keyPath] },
-            set: { store.settings[keyPath: keyPath] = $0; store.settings.save() }
+            get: { state.settings[keyPath: keyPath] },
+            set: { state.updateSetting(keyPath, $0) }
         )
     }
 
@@ -130,12 +129,8 @@ struct SettingsPanel: View {
         _ keyPath: WritableKeyPath<ProviderThresholds, Double>
     ) -> Binding<Double> {
         Binding(
-            get: { store.settings.thresholds(for: kind)[keyPath: keyPath] },
-            set: { value in
-                var thresholds = store.settings.thresholds(for: kind)
-                thresholds[keyPath: keyPath] = value
-                store.settings.thresholds[kind] = thresholds
-            }
+            get: { state.settings.thresholds(for: kind)[keyPath: keyPath] },
+            set: { state.updateThreshold(kind, keyPath, $0) }
         )
     }
 

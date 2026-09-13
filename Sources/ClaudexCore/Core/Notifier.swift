@@ -5,9 +5,11 @@ import UserNotifications
 /// announced here; the app never kills a running session, so the notification is the only
 /// signal that the account under the next `claude` or `codex` run has changed.
 @MainActor
-final class Notifier {
+public final class Notifier {
     private var authorized = false
     private var requested = false
+
+    public init() {}
 
     /// `UNUserNotificationCenter.current()` raises when the process has no application bundle,
     /// which is exactly what `--poll` and `--switch` run as. Gating on the bundle keeps the

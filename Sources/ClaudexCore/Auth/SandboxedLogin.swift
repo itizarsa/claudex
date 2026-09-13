@@ -7,43 +7,64 @@ import Foundation
 /// directory nothing else reads, and claudex adopts what lands there. The account the CLI is
 /// signed into is never touched, so a sign-in cannot log the user out of the session they are
 /// in the middle of.
-public enum SandboxedLogin {
+public struct LoginResult: Sendable {
+    public let account: Account
+    public let wasAlreadyKnown: Bool
+}
+
+public protocol AccountSigningIn: Sendable {
+    @MainActor
+    func run(_ kind: ProviderKind) async throws -> LoginResult
+}
+
+@MainActor
+public final class SandboxedLogin: AccountSigningIn {
     /// Long enough for a browser round trip including a password manager and an MFA prompt.
     public static let timeout: TimeInterval = 300
     private static let pollInterval: TimeInterval = 1
 
-    public struct Result {
-        public let account: Account
-        public let wasAlreadyKnown: Bool
+    private let store: AccountStore
+    private let providers: ProviderRegistry
+    private let switcher: any AccountSwitching
+
+    public init(
+        store: AccountStore,
+        providers: ProviderRegistry,
+        switcher: any AccountSwitching
+    ) {
+        self.store = store
+        self.providers = providers
+        self.switcher = switcher
     }
 
     /// Runs the login and stores whatever it produces as an inactive account. Inactive on
     /// purpose: adding an account is not a request to switch to it, and switching is one click
     /// away in the panel.
     @MainActor
-    public static func run(_ kind: ProviderKind, into store: AccountStore) async throws -> Result {
+    public func run(_ kind: ProviderKind) async throws -> LoginResult {
         Log.write("login: starting \(kind.rawValue)")
-        let directory = try makeDirectory()
+        let directory = try Self.makeDirectory()
         Log.write("login: config dir \(directory.path)")
         // Claude Code derives its Keychain service name from the config directory, so the login
         // leaves an item behind under a name claudex cannot compute. Recording what existed
         // beforehand is how it is found afterwards, and how it gets cleaned up.
         let servicesBefore = (kind == .claude) ? ((try? ClaudeCLIKeychain.credentialServices()) ?? []) : []
 
-        defer { clean(directory, kind: kind, servicesBefore: servicesBefore) }
+        defer { Self.clean(directory, kind: kind, servicesBefore: servicesBefore) }
 
-        let login = try launch(kind, in: directory)
+        let provider = try providers.provider(for: kind)
+        let login = try Self.launch(kind, in: directory)
         defer { login.stop() }
-        let credentials = try await waitForCredentials(
-            kind, in: directory, servicesBefore: servicesBefore, login: login
+        let credentials = try await Self.waitForCredentials(
+            provider, in: directory, servicesBefore: servicesBefore, login: login
         )
         Log.write("login: got credentials, fingerprint \(credentials.refreshFingerprint)")
 
-        // The gating lives in `fetchIdentity`: an API key or an account with no claude.ai
+        // The gating lives in the API's `identity`: an API key or an account with no claude.ai
         // subscription is rejected there, before anything is written to the store.
         let identity: Identity
         do {
-            identity = try await Providers.of(kind).fetchIdentity(credentials)
+            identity = try await provider.identity(credentials)
             Log.write("login: identity \(identity.email) / \(identity.plan)")
         } catch {
             Log.write("login: identity failed — \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
@@ -53,7 +74,7 @@ public enum SandboxedLogin {
         if let existing = store.existing(matching: identity, kind: kind) {
             try store.storeCredentials(credentials, for: existing)
             Log.write("login: updated existing account \(existing.label)")
-            return Result(account: existing, wasAlreadyKnown: true)
+            return LoginResult(account: existing, wasAlreadyKnown: true)
         }
 
         let label = AccountLabel.suggested(for: identity, kind: kind, store: store)
@@ -63,11 +84,11 @@ public enum SandboxedLogin {
         // one has nothing to be switched away from, and signing in here is how the CLI is meant
         // to get its credentials now, so it takes over straight away.
         if isFirst {
-            try await Switcher.activate(account, in: store)
+            _ = try await switcher.activate(account)
             Log.write("login: \(account.label) is the first \(kind.rawValue) account, signed the CLI into it")
         }
         Log.write("login: added \(account.label); store now has \(store.accounts(for: kind).count) \(kind.rawValue) account(s)")
-        return Result(account: account, wasAlreadyKnown: false)
+        return LoginResult(account: account, wasAlreadyKnown: false)
     }
 
     // MARK: - Running the CLI
@@ -202,18 +223,18 @@ public enum SandboxedLogin {
     // MARK: - Collecting the result
 
     private static func waitForCredentials(
-        _ kind: ProviderKind,
+        _ provider: AnyProvider,
         in directory: URL,
         servicesBefore: Set<String>,
         login: LoginProcess
     ) async throws -> Credentials {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
-            if let credentials = try? read(kind, in: directory, servicesBefore: servicesBefore) {
+            if let credentials = try? read(provider, in: directory, servicesBefore: servicesBefore) {
                 // The CLI writes the file and then goes on to write the rest of its config, so
                 // a moment's grace keeps a half-written file from being parsed as a whole one.
                 try? await Task.sleep(for: .milliseconds(500))
-                if let settled = try? read(kind, in: directory, servicesBefore: servicesBefore) {
+                if let settled = try? read(provider, in: directory, servicesBefore: servicesBefore) {
                     return settled
                 }
                 return credentials
@@ -222,7 +243,7 @@ public enum SandboxedLogin {
             // timeout after that would leave the panel claiming a sign-in is still in progress.
             if !login.isRunning {
                 // One more look: the credential may have landed between the last poll and exit.
-                if let credentials = try? read(kind, in: directory, servicesBefore: servicesBefore) {
+                if let credentials = try? read(provider, in: directory, servicesBefore: servicesBefore) {
                     return credentials
                 }
                 Log.write("login: CLI exited before a credential appeared")
@@ -237,18 +258,18 @@ public enum SandboxedLogin {
     }
 
     private static func read(
-        _ kind: ProviderKind,
+        _ provider: AnyProvider,
         in directory: URL,
         servicesBefore: Set<String>
     ) throws -> Credentials? {
-        switch kind {
+        switch provider.kind {
         case .codex:
             guard let data = try? Data(contentsOf: directory.appending(path: "auth.json")) else { return nil }
-            return try CodexProvider.parse(data)
+            return try provider.parseCLICredentials(data)
 
         case .claude:
             if let data = try? Data(contentsOf: directory.appending(path: ".credentials.json")),
-               let credentials = try ClaudeProvider.parse(data) {
+               let credentials = try provider.parseCLICredentials(data) {
                 return credentials
             }
             // Claude Code may keep the credential in the Keychain alone. The item it wrote is
@@ -256,7 +277,7 @@ public enum SandboxedLogin {
             guard let service = try newService(since: servicesBefore),
                   let data = try ClaudeCLIKeychain.readRaw(service: service)
             else { return nil }
-            return try ClaudeProvider.parse(data)
+            return try provider.parseCLICredentials(data)
         }
     }
 
@@ -275,7 +296,7 @@ public enum SandboxedLogin {
 }
 
 private extension ProviderKind {
-    public var executable: String {
+    var executable: String {
         switch self {
         case .claude: return "claude"
         case .codex: return "codex"
@@ -284,7 +305,7 @@ private extension ProviderKind {
 
     /// `--claudeai` picks the subscription flow over the console/API-key one, which is the only
     /// flow claudex can read usage for.
-    public var loginArguments: [String] {
+    var loginArguments: [String] {
         switch self {
         case .claude: return ["auth", "login", "--claudeai"]
         case .codex: return ["login"]
@@ -294,7 +315,7 @@ private extension ProviderKind {
     /// Where the login is told to write. Claude Code 2.1.220 and later hash a second variable
     /// into their Keychain service name, so both have to point at the throwaway directory or the
     /// login lands on the account the CLI is already signed into.
-    public func configEnvironment(_ directory: URL) -> [String: String] {
+    func configEnvironment(_ directory: URL) -> [String: String] {
         switch self {
         case .claude:
             return [
