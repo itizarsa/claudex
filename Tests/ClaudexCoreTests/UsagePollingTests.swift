@@ -78,6 +78,20 @@ import Testing
         #expect(scheduler.nextDueAccount(from: [first], now: now.addingTimeInterval(400))?.id == first.id)
     }
 
+    @Test func inactiveAccountsAreStaggeredAcrossProviders() throws {
+        let claude = candidate(provider: .claude, active: false, order: 0)
+        let codex = candidate(provider: .codex, active: false, order: 1)
+        var scheduler = UsagePollScheduler()
+        scheduler.start(accounts: [claude, codex], activity: [:], now: now)
+
+        #expect(scheduler.nextDueAccount(from: [claude, codex], now: now.addingTimeInterval(99)) == nil)
+        #expect(scheduler.nextDueAccount(from: [claude, codex], now: now.addingTimeInterval(100))?.id == claude.id)
+        scheduler.didStart(claude, at: now.addingTimeInterval(100))
+        scheduler.didSucceed(claude)
+        #expect(scheduler.nextDueAccount(from: [claude, codex], now: now.addingTimeInterval(199)) == nil)
+        #expect(scheduler.nextDueAccount(from: [claude, codex], now: now.addingTimeInterval(200))?.id == codex.id)
+    }
+
     @Test func manualRefreshCannotBypassFloorOrBackoff() throws {
         let account = candidate(active: true, interval: 30)
         var scheduler = UsagePollScheduler()

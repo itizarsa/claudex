@@ -71,13 +71,16 @@ struct UsagePollScheduler {
         hasStarted = true
         observedActivityAt = activity
 
-        for provider in ProviderKind.allCases {
-            let inactive = accounts
-                .filter { $0.provider == provider && !$0.isActive }
-                .sorted { $0.order < $1.order }
+        let inactive = accounts
+            .filter { !$0.isActive }
+            .sorted {
+                if $0.order != $1.order { return $0.order < $1.order }
+                return $0.id.uuidString < $1.id.uuidString
+            }
+        if let staggerWindow = inactive.map(\.effectiveInterval).min() {
             for (index, account) in inactive.enumerated() {
                 let fraction = Double(index + 1) / Double(inactive.count + 1)
-                initialEligibleAt[account.id] = now.addingTimeInterval(account.effectiveInterval * fraction)
+                initialEligibleAt[account.id] = now.addingTimeInterval(staggerWindow * fraction)
             }
         }
         for account in accounts where account.isActive {
