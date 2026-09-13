@@ -43,6 +43,7 @@ struct UsagePopover: View {
 
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
+                ProviderMark(kind: kind)
                 Text(kind.displayName.uppercased())
                     .font(Theme.sectionHeader)
                     .tracking(0.6)
@@ -50,7 +51,9 @@ struct UsagePopover: View {
                 Spacer()
                 IconButton(
                     systemName: "plus",
-                    help: "Add a \(kind.displayName) account by signing in to it in your browser"
+                    help: "Add a \(kind.displayName) account by signing in to it in your browser",
+                    size: 26,
+                    glyphSize: 11
                 ) {
                     signIn(kind)
                 }
@@ -59,11 +62,7 @@ struct UsagePopover: View {
             .padding(.leading, 2)
 
             if accounts.isEmpty {
-                EmptyProviderCard(
-                    kind: kind,
-                    busy: signingIn == kind,
-                    onSignIn: { signIn(kind) }
-                )
+                EmptyProviderCard(kind: kind, busy: signingIn == kind, onSignIn: { signIn(kind) })
             } else {
                 VStack(spacing: 6) {
                     ForEach(accounts) { account in
@@ -426,33 +425,32 @@ struct EmptyProviderCard: View {
     let kind: ProviderKind
     let busy: Bool
     let onSignIn: () -> Void
+    @State private var hovering = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("No \(kind.displayName) account yet")
+        // One quiet row, the height of a control rather than of a card: the absence should not
+        // take up more room than the account that replaces it, and a dashed outline of a card
+        // that isn't there reads as damage. Plain words plus a plus, centred.
+        HStack(spacing: 6) {
+            Image(systemName: busy ? "ellipsis" : "plus")
+                .font(.system(size: 9, weight: .bold))
+            Text(busy ? "Signing in…" : "Sign in to \(kind.displayName)")
                 .font(Theme.accountName)
-                .foregroundStyle(Theme.primaryText)
-            Text(kind == .claude
-                 ? "Sign in to a claude.ai account. Claudex signs the CLI into it for you."
-                 : "Sign in to a ChatGPT account. Claudex signs the CLI into it for you.")
-                .font(Theme.caption)
-                .foregroundStyle(Theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
-
-            TextButton(title: busy ? "Signing in…" : "Sign in", action: onSignIn)
-                .disabled(busy)
         }
-        .padding(.horizontal, Theme.cardPaddingH)
-        .padding(.vertical, Theme.cardPaddingV)
-        .frame(maxWidth: .infinity, alignment: .leading)
+        .foregroundStyle(hovering ? Theme.primaryText : Theme.secondaryText)
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 9)
+        .contentShape(Rectangle())
+        .onTapGesture { if !busy { onSignIn() } }
+        .help("Sign in to a \(kind.displayName) account in your browser")
         .background(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(Theme.card)
+            RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                .fill(hovering ? Theme.cardHover : Color.primary.opacity(0.03))
         )
-        .overlay(
-            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .strokeBorder(Theme.hairline, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
-        )
+        .opacity(busy ? 0.62 : 1)
+        .onHover { hovering = $0 && !busy }
+        .animation(Theme.transition, value: hovering)
+        .animation(Theme.transition, value: busy)
     }
 }
 
@@ -461,15 +459,17 @@ struct EmptyProviderCard: View {
 struct IconButton: View {
     let systemName: String
     let help: String
+    var size: CGFloat = 22
+    var glyphSize: CGFloat = 10
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             Image(systemName: systemName)
-                .font(.system(size: 10, weight: .bold))
+                .font(.system(size: glyphSize, weight: .bold))
                 .foregroundStyle(hovering ? Theme.primaryText : Theme.secondaryText)
-                .frame(width: 22, height: 22)
+                .frame(width: size, height: size)
                 .background(
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
                         .fill(Color.primary.opacity(hovering ? 0.1 : 0.045))

@@ -22,6 +22,10 @@ enum Theme {
     /// The identity hue: alias badge and the active tag, both at low opacity. Kept distinct
     /// from severity so "which account" and "how full" never compete.
     static let accent = Color.accentColor
+    /// Each provider's own hue, used only by its mark so a section is identifiable before
+    /// the header is read.
+    static let claudeMark = Color(red: 0.85, green: 0.47, blue: 0.34)
+    static let codexMark = Color(white: 0.88)
 
     static let primaryText = Color.primary
     static let secondaryText = Color.secondary
