@@ -4,7 +4,6 @@ struct UsagePopover: View {
     @Bindable var store: AccountStore
     let engine: UsageEngine
     @State private var notice: String?
-    @State private var busyProvider: ProviderKind?
     @State private var switchingAccount: UUID?
     @State private var showingSettings = false
     @State private var signingIn: ProviderKind?
@@ -49,13 +48,9 @@ struct UsagePopover: View {
                     .tracking(0.6)
                     .foregroundStyle(Theme.secondaryText)
                 Spacer()
-                IconButton(systemName: "plus", help: "Add the account this CLI is signed into") {
-                    importCurrent(kind)
-                }
-                .disabled(isBusy)
                 IconButton(
-                    systemName: "person.badge.plus",
-                    help: "Sign in to another \(kind.displayName) account in a Terminal window"
+                    systemName: "plus",
+                    help: "Add a \(kind.displayName) account by signing in to it in your browser"
                 ) {
                     signIn(kind)
                 }
@@ -66,8 +61,7 @@ struct UsagePopover: View {
             if accounts.isEmpty {
                 EmptyProviderCard(
                     kind: kind,
-                    busy: busyProvider == kind || signingIn == kind,
-                    onImport: { importCurrent(kind) },
+                    busy: signingIn == kind,
                     onSignIn: { signIn(kind) }
                 )
             } else {
@@ -141,41 +135,26 @@ struct UsagePopover: View {
         }
     }
 
-    private var isBusy: Bool { busyProvider != nil || signingIn != nil }
+    private var isBusy: Bool { signingIn != nil }
 
-    /// The CLI's own login runs in a Terminal window against a throwaway config directory, so
-    /// the account currently signed in is untouched and claudex owns no OAuth code. The new
-    /// account is added inactive: adding is not a request to switch.
+    /// The CLI's own login runs hidden against a throwaway config directory and opens the
+    /// browser itself, so the account currently signed in is untouched and claudex owns no OAuth
+    /// code. The new account is added inactive: adding is not a request to switch.
     private func signIn(_ kind: ProviderKind) {
         guard !isBusy else { return }
         signingIn = kind
-        notice = "Finish the sign-in in the Terminal window. Claudex is waiting for it."
+        notice = "Finish the sign-in in your browser. Claudex is waiting for it."
         Task {
             defer { signingIn = nil }
             do {
                 let result = try await SandboxedLogin.run(kind, into: store)
+                Log.write("panel: sign-in returned \(result.account.label), already known \(result.wasAlreadyKnown)")
                 notice = result.wasAlreadyKnown
                     ? "\(result.account.label) was already tracked. Its credentials are up to date."
                     : "Added \(result.account.label). It is not active — switch to it when you want it."
                 engine.refreshAll()
             } catch {
-                notice = ErrorPresenter.message(error)
-            }
-        }
-    }
-
-    private func importCurrent(_ kind: ProviderKind) {
-        busyProvider = kind
-        notice = nil
-        Task {
-            defer { busyProvider = nil }
-            do {
-                let result = try await CLIImport.importCurrent(kind, into: store)
-                if result.wasAlreadyKnown {
-                    notice = "\(result.account.label) was already tracked. Its credentials are up to date."
-                }
-                engine.refreshAll()
-            } catch {
+                Log.write("panel: sign-in failed — \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
                 notice = ErrorPresenter.message(error)
             }
         }
@@ -446,7 +425,6 @@ struct SkeletonRow: View {
 struct EmptyProviderCard: View {
     let kind: ProviderKind
     let busy: Bool
-    let onImport: () -> Void
     let onSignIn: () -> Void
 
     var body: some View {
@@ -455,18 +433,14 @@ struct EmptyProviderCard: View {
                 .font(Theme.accountName)
                 .foregroundStyle(Theme.primaryText)
             Text(kind == .claude
-                 ? "Add the claude.ai account your CLI is signed into."
-                 : "Add the ChatGPT account your CLI is signed into.")
+                 ? "Sign in to a claude.ai account. Claudex signs the CLI into it for you."
+                 : "Sign in to a ChatGPT account. Claudex signs the CLI into it for you.")
                 .font(Theme.caption)
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
-            HStack(spacing: 4) {
-                TextButton(title: busy ? "Adding…" : "Add current account", action: onImport)
-                    .disabled(busy)
-                TextButton(title: "Sign in", action: onSignIn)
-                    .disabled(busy)
-            }
+            TextButton(title: busy ? "Signing in…" : "Sign in", action: onSignIn)
+                .disabled(busy)
         }
         .padding(.horizontal, Theme.cardPaddingH)
         .padding(.vertical, Theme.cardPaddingV)

@@ -99,7 +99,6 @@ app; with flags it runs headless:
 
     claudex --probe    # read both CLIs, print parsed identity and usage. Writes nothing.
     claudex --vault    # round-trip a throwaway credential through the vault
-    claudex --import   # adopt whatever the CLIs are signed into
     claudex --poll     # one poll cycle through the vault, printing each step
     claudex --rotate   # poll, then print what the rotation rule would do. Switches nothing
     claudex --login <claude|codex>   # run the CLI's own login in a throwaway config dir
@@ -136,7 +135,7 @@ endpoints still return the shape this app expects.
           CodexProvider.swift
         Auth/
           SandboxedLogin.swift    # spawn the CLI's own login into a throwaway config dir
-          CLIImport.swift         # adopt whatever the CLI is signed into now
+          AccountLabel.swift      # name an account from its identity
 
 Provider protocol, one seam per CLI:
 
@@ -146,7 +145,7 @@ Provider protocol, one seam per CLI:
         func fetchIdentity(_ creds: Credentials) async throws -> Identity
         func refresh(_ creds: Credentials) async throws -> Credentials
         func activate(_ creds: Credentials, identity: Identity) throws  // write CLI state
-        func readCurrentCLICredentials() throws -> Credentials?         // for import
+        func readCurrentCLICredentials() throws -> Credentials?         // the active account
     }
 
 `activate` is the only writer of CLI state. For Claude it writes
@@ -413,9 +412,16 @@ fresh directory as signed out, which is what keeps the live account out of the f
 and `LoopbackServer.swift` never existed and are not coming: no loopback listener, no code
 verifier, no client ids to keep current.
 
-Both logins are interactive, and a menu bar app has no terminal to hand them, so the command goes
-to Terminal.app and claudex watches the directory rather than the process. The user sees what the
-CLI says when something goes wrong, which a captured pipe would swallow.
+Both CLIs open the browser themselves, so the login runs as a hidden child of claudex and the
+only window the user sees is the one the sign-in actually happens in. A Terminal window was tried
+first and is the wrong surface: it shows a console to someone who has no reason to read one.
+claudex watches the directory for the credential and the process for an early exit, so a refused
+or cancelled sign-in reports straight away instead of waiting out the five-minute timeout; the
+CLI's last line of output is what the panel shows. The child's stdin stays open on a pipe it
+never reads — Claude Code ties its callback server's lifetime to stdin, and `.nullDevice` reads
+EOF and tears the server down mid-flow. `CLAUDE_SECURESTORAGE_CONFIG_DIR` is exported alongside
+`CLAUDE_CONFIG_DIR`: Claude Code 2.1.220 and later hash it into the Keychain service name, and
+leaving it unset writes the new credential over the account the CLI is already signed into.
 
 Claude Code derives its Keychain service name from the config directory, so a sandboxed login
 leaves an item under a name claudex cannot compute. The set of `Claude Code-credentials…`
@@ -424,9 +430,22 @@ and then delete. `security dump-keychain` without `-d` lists attributes only, so
 secret and no prompt. The directory's `.credentials.json` is still tried first, since it is there
 whenever the CLI writes both.
 
-The new account is stored **inactive**. Adding an account is not a request to switch to it, and
-the switch is one click away in the panel. Gating is unchanged and happens before anything is
-stored, because it lives in `fetchIdentity`.
+The new account is stored **inactive**, except for the first account of a provider, which the
+CLI is signed into on the spot: adding a second account is not a request to switch to it, but the
+first has nothing to switch away from, and signing in here is now the only way an account reaches
+the CLI at all. Gating is unchanged and happens before anything is stored, because it lives in
+`fetchIdentity`.
+
+Importing whatever the CLI happens to be signed into was the original way in, and is gone. It
+made two ways to add an account, of which one quietly depended on the user having already done
+the other somewhere else. Sign-in is the single door: claudex runs the login, holds the
+credentials, and writes them to the CLI. `readCurrentCLICredentials` stays — the active account's
+tokens still live in the CLI's own storage, and that is where they are read from.
+
+The sign-in writes a transcript to `~/Library/Logs/claudex.log`: what was spawned, every line
+the CLI printed, the identity that came back and what the store did with it. A menu bar app has
+no console, and one line of notice in the panel is rarely enough to say why a login did not
+land.
 
 Phase 5 — packaging. **Done.** `make bundle` assembles the `.app`, stamps the version, and
 ad-hoc signs it; `make verify` checks the signature; `make install` puts it in `/Applications`

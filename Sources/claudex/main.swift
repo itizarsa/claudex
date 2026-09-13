@@ -10,7 +10,6 @@ if !arguments.isEmpty {
     Task {
         if arguments.contains("--vault") { Probe.vaultSelfTest() }
         if arguments.contains("--probe") { await Probe.run() }
-        if arguments.contains("--import") { await Probe.importCurrent() }
         if let index = CommandLine.arguments.firstIndex(of: "--switch"),
            index + 1 < CommandLine.arguments.count {
             await Probe.switchTo(CommandLine.arguments[index + 1])

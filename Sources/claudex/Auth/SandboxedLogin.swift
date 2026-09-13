@@ -22,7 +22,9 @@ enum SandboxedLogin {
     /// away in the panel.
     @MainActor
     static func run(_ kind: ProviderKind, into store: AccountStore) async throws -> Result {
+        Log.write("login: starting \(kind.rawValue)")
         let directory = try makeDirectory()
+        Log.write("login: config dir \(directory.path)")
         // Claude Code derives its Keychain service name from the config directory, so the login
         // leaves an item behind under a name claudex cannot compute. Recording what existed
         // beforehand is how it is found afterwards, and how it gets cleaned up.
@@ -30,20 +32,41 @@ enum SandboxedLogin {
 
         defer { clean(directory, kind: kind, servicesBefore: servicesBefore) }
 
-        try launch(kind, in: directory)
-        let credentials = try await waitForCredentials(kind, in: directory, servicesBefore: servicesBefore)
+        let login = try launch(kind, in: directory)
+        defer { login.stop() }
+        let credentials = try await waitForCredentials(
+            kind, in: directory, servicesBefore: servicesBefore, login: login
+        )
+        Log.write("login: got credentials, fingerprint \(credentials.refreshFingerprint)")
 
         // The gating lives in `fetchIdentity`: an API key or an account with no claude.ai
         // subscription is rejected there, before anything is written to the store.
-        let identity = try await Providers.of(kind).fetchIdentity(credentials)
+        let identity: Identity
+        do {
+            identity = try await Providers.of(kind).fetchIdentity(credentials)
+            Log.write("login: identity \(identity.email) / \(identity.plan)")
+        } catch {
+            Log.write("login: identity failed — \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
+            throw error
+        }
 
         if let existing = store.existing(matching: identity, kind: kind) {
             try store.storeCredentials(credentials, for: existing)
+            Log.write("login: updated existing account \(existing.label)")
             return Result(account: existing, wasAlreadyKnown: true)
         }
 
-        let label = CLIImport.suggestedLabel(for: identity, kind: kind, store: store)
+        let label = AccountLabel.suggested(for: identity, kind: kind, store: store)
+        let isFirst = store.accounts(for: kind).isEmpty
         let account = try store.add(identity: identity, kind: kind, label: label, credentials: credentials)
+        // A later account is added inactive — adding is not a request to switch — but the first
+        // one has nothing to be switched away from, and signing in here is how the CLI is meant
+        // to get its credentials now, so it takes over straight away.
+        if isFirst {
+            try await Switcher.activate(account, in: store)
+            Log.write("login: \(account.label) is the first \(kind.rawValue) account, signed the CLI into it")
+        }
+        Log.write("login: added \(account.label); store now has \(store.accounts(for: kind).count) \(kind.rawValue) account(s)")
         return Result(account: account, wasAlreadyKnown: false)
     }
 
@@ -60,56 +83,120 @@ enum SandboxedLogin {
         return directory
     }
 
-    /// Both logins are interactive: they print a URL, open a browser and wait. A GUI app has no
-    /// terminal to give them, so the command goes to Terminal.app and claudex watches the
-    /// directory rather than the process. That also means the user can read what the CLI says
-    /// when something goes wrong, which a captured pipe would swallow.
-    private static func launch(_ kind: ProviderKind, in directory: URL) throws {
-        let script = directory.appending(path: "login.sh")
-        try Data(scriptBody(kind, directory: directory).utf8).write(to: script)
-        try FileManager.default.setAttributes(
-            [.posixPermissions: NSNumber(value: 0o700)],
-            ofItemAtPath: script.path
-        )
+    /// Both logins open the browser themselves: the CLI prints a URL, launches the default
+    /// browser and waits on its own loopback callback. So the CLI runs as a hidden child of
+    /// claudex rather than in a Terminal window — the user sees the browser, which is where the
+    /// sign-in actually happens, and not a console they have no reason to read.
+    ///
+    /// Output is captured so a failure can be reported in the panel instead of vanishing with
+    /// the process.
+    private static func launch(_ kind: ProviderKind, in directory: URL) throws -> LoginProcess {
+        guard let executable = resolveExecutable(kind) else {
+            Log.write("login: \(kind.executable) not found on \(searchPaths.joined(separator: ":"))")
+            throw ClaudexError.unsupportedAccount(
+                "\(kind.executable) is not installed where claudex can find it"
+            )
+        }
 
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
-        process.arguments = ["-a", "Terminal", script.path]
-        try process.run()
-        process.waitUntilExit()
-        guard process.terminationStatus == 0 else {
-            throw ClaudexError.unsupportedAccount("Could not open Terminal to run the sign-in")
+        process.executableURL = executable
+        process.arguments = kind.loginArguments
+
+        var environment = ProcessInfo.processInfo.environment
+        for (key, value) in kind.configEnvironment(directory) { environment[key] = value }
+        // A GUI process inherits a minimal PATH, and both CLIs shell out to helpers of their own.
+        environment["PATH"] = ([executable.deletingLastPathComponent().path] + searchPaths)
+            .joined(separator: ":")
+        process.environment = environment
+
+        let output = Pipe()
+        process.standardOutput = output
+        process.standardError = output
+        // Claude Code ties its callback server's lifetime to stdin. An open pipe it never reads
+        // from keeps the server up; `.nullDevice` reads EOF and tears it down mid-flow.
+        process.standardInput = Pipe()
+
+        do {
+            try process.run()
+            Log.write("login: spawned \(executable.path) \(kind.loginArguments.joined(separator: " ")) pid \(process.processIdentifier)")
+        } catch {
+            throw ClaudexError.unsupportedAccount("Could not start \(kind.executable): \(error.localizedDescription)")
+        }
+        return LoginProcess(process: process, output: output)
+    }
+
+    /// Holds the running login and everything it has said so far. The transcript is only read
+    /// when the login fails, where it is the one explanation of why.
+    final class LoginProcess {
+        private let process: Process
+        private let output: Pipe
+        private let lock = NSLock()
+        private var transcript = ""
+
+        init(process: Process, output: Pipe) {
+            self.process = process
+            self.output = output
+            output.fileHandleForReading.readabilityHandler = { [weak self] handle in
+                let data = handle.availableData
+                guard !data.isEmpty, let self else { return }
+                self.lock.lock()
+                self.transcript += String(decoding: data, as: UTF8.self)
+                self.transcript = String(self.transcript.suffix(4000))
+                self.lock.unlock()
+                for line in String(decoding: data, as: UTF8.self)
+                    .split(whereSeparator: \.isNewline)
+                    .map({ $0.trimmingCharacters(in: .whitespaces) })
+                where !line.isEmpty {
+                    Log.write("cli: \(line.prefix(300))")
+                }
+            }
+        }
+
+        var isRunning: Bool { process.isRunning }
+
+        var lastLine: String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return transcript
+                .split(whereSeparator: \.isNewline)
+                .last { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+                .map { String($0.trimmingCharacters(in: .whitespaces).suffix(200)) }
+        }
+
+        /// Called once the credential has been collected, and again on every failure path. The
+        /// CLI would otherwise sit on its callback port until its own timeout.
+        func stop() {
+            output.fileHandleForReading.readabilityHandler = nil
+            guard process.isRunning else { return }
+            process.terminate()
+            // A login that ignores SIGTERM still has a live refresh token in memory and a port
+            // held open, so it does not get to outlive the window it was for.
+            let running = process
+            DispatchQueue.global().asyncAfter(deadline: .now() + 2) {
+                if running.isRunning { kill(running.processIdentifier, SIGKILL) }
+            }
         }
     }
 
-    private static func scriptBody(_ kind: ProviderKind, directory: URL) -> String {
-        let (variable, command, executable) = switch kind {
-        case .claude: ("CLAUDE_CONFIG_DIR", "claude auth login --claudeai", "claude")
-        case .codex: ("CODEX_HOME", "codex login", "codex")
-        }
+    /// The CLIs install to a handful of well-known places, none of which a GUI app's inherited
+    /// PATH is guaranteed to include.
+    private static let searchPaths = [
+        "\(NSHomeDirectory())/.local/bin",
+        "\(NSHomeDirectory())/.claude/local",
+        "\(NSHomeDirectory())/.codex/bin",
+        "/opt/homebrew/bin",
+        "/usr/local/bin",
+        "/usr/bin",
+    ]
 
-        // Terminal starts a login shell, but not every installation puts the CLI on the PATH a
-        // non-interactive script inherits, so the usual locations are added rather than left to
-        // chance.
-        return """
-        #!/bin/sh
-        export PATH="$HOME/.local/bin:$HOME/.claude/local:$HOME/.codex/bin:/opt/homebrew/bin:/usr/local/bin:$PATH"
-        export \(variable)="\(directory.path)"
-        echo "Signing in to a separate \(kind.displayName) account."
-        echo "Your current account is untouched — this runs against a throwaway directory."
-        echo
-        if ! command -v \(executable) >/dev/null 2>&1; then
-            echo "\(executable) is not on the PATH. Install it, or run this by hand:"
-            echo "  \(variable)=\(directory.path) \(command)"
-            echo
-            echo "Press return to close."
-            read _
-            exit 1
-        fi
-        \(command)
-        echo
-        echo "Done. Claudex is picking this up; you can close this window."
-        """
+    private static func resolveExecutable(_ kind: ProviderKind) -> URL? {
+        let name = kind.executable
+        let fromPath = (ProcessInfo.processInfo.environment["PATH"]?.split(separator: ":").map(String.init) ?? [])
+        for directory in searchPaths + fromPath {
+            let candidate = URL(fileURLWithPath: directory).appending(path: name)
+            if FileManager.default.isExecutableFile(atPath: candidate.path) { return candidate }
+        }
+        return nil
     }
 
     // MARK: - Collecting the result
@@ -117,7 +204,8 @@ enum SandboxedLogin {
     private static func waitForCredentials(
         _ kind: ProviderKind,
         in directory: URL,
-        servicesBefore: Set<String>
+        servicesBefore: Set<String>,
+        login: LoginProcess
     ) async throws -> Credentials {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline {
@@ -130,8 +218,21 @@ enum SandboxedLogin {
                 }
                 return credentials
             }
+            // The CLI exits as soon as the flow is cancelled or refused. Waiting out the full
+            // timeout after that would leave the panel claiming a sign-in is still in progress.
+            if !login.isRunning {
+                // One more look: the credential may have landed between the last poll and exit.
+                if let credentials = try? read(kind, in: directory, servicesBefore: servicesBefore) {
+                    return credentials
+                }
+                Log.write("login: CLI exited before a credential appeared")
+                throw ClaudexError.unsupportedAccount(
+                    login.lastLine.map { "Sign-in did not finish: \($0)" } ?? "Sign-in did not finish"
+                )
+            }
             try await Task.sleep(for: .seconds(pollInterval))
         }
+        Log.write("login: timed out after \(Int(timeout)) seconds")
         throw ClaudexError.unsupportedAccount("Sign-in timed out after \(Int(timeout / 60)) minutes")
     }
 
@@ -170,5 +271,38 @@ enum SandboxedLogin {
             try? ClaudeCLIKeychain.delete(service: service)
         }
         try? FileManager.default.removeItem(at: directory)
+    }
+}
+
+private extension ProviderKind {
+    var executable: String {
+        switch self {
+        case .claude: return "claude"
+        case .codex: return "codex"
+        }
+    }
+
+    /// `--claudeai` picks the subscription flow over the console/API-key one, which is the only
+    /// flow claudex can read usage for.
+    var loginArguments: [String] {
+        switch self {
+        case .claude: return ["auth", "login", "--claudeai"]
+        case .codex: return ["login"]
+        }
+    }
+
+    /// Where the login is told to write. Claude Code 2.1.220 and later hash a second variable
+    /// into their Keychain service name, so both have to point at the throwaway directory or the
+    /// login lands on the account the CLI is already signed into.
+    func configEnvironment(_ directory: URL) -> [String: String] {
+        switch self {
+        case .claude:
+            return [
+                "CLAUDE_CONFIG_DIR": directory.path,
+                "CLAUDE_SECURESTORAGE_CONFIG_DIR": directory.path,
+            ]
+        case .codex:
+            return ["CODEX_HOME": directory.path]
+        }
     }
 }

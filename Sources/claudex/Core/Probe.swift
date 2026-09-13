@@ -29,23 +29,6 @@ enum Probe {
         }
     }
 
-    /// Headless equivalent of the popover's "Import current" button. Touches only claudex's
-    /// own store and Keychain items, never the CLI's credentials.
-    @MainActor
-    static func importCurrent() async {
-        let store = AccountStore()
-        for kind in ProviderKind.allCases {
-            do {
-                let result = try await CLIImport.importCurrent(kind, into: store)
-                let status = result.wasAlreadyKnown ? "updated" : "added"
-                print("\(kind.displayName): \(status) \(result.account.label) (\(result.account.identity.email))")
-            } catch {
-                let message = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
-                print("\(kind.displayName): skipped — \(message)")
-            }
-        }
-    }
-
     /// Round-trips a throwaway item through claudex's own Keychain service. Confirms the
     /// vault works without an authorisation prompt, separately from any CLI-owned item.
     static func vaultSelfTest() {
@@ -201,9 +184,9 @@ enum Probe {
         }
     }
 
-    /// Headless equivalent of the popover's "Sign in". Opens the CLI's own login in a Terminal
-    /// window against a throwaway directory and adopts whatever it writes there, leaving the
-    /// account the CLI is signed into alone.
+    /// Headless equivalent of the popover's "Sign in". Runs the CLI's own login against a
+    /// throwaway directory and adopts whatever it writes there, leaving the account the CLI is
+    /// signed into alone.
     @MainActor
     static func login(_ name: String) async {
         guard let kind = ProviderKind(rawValue: name.lowercased()) else {
@@ -211,7 +194,7 @@ enum Probe {
             return
         }
         let store = AccountStore()
-        print("opening a Terminal window for the \(kind.displayName) sign-in…")
+        print("opening the browser for the \(kind.displayName) sign-in…")
         do {
             let result = try await SandboxedLogin.run(kind, into: store)
             let status = result.wasAlreadyKnown ? "updated" : "added"

@@ -113,9 +113,18 @@ final class AccountStore {
 
     func save() {
         let payload = PersistedAccounts(accounts: accounts, active: active)
-        guard let data = try? JSONEncoder.claudex.encode(payload) else { return }
-        try? Paths.ensureSupportDirectory()
-        try? AtomicFile.write(data, to: Paths.accountsFile)
+        guard let data = try? JSONEncoder.claudex.encode(payload) else {
+            Log.write("store: could not encode \(accounts.count) account(s)")
+            return
+        }
+        do {
+            try Paths.ensureSupportDirectory()
+            try AtomicFile.write(data, to: Paths.accountsFile)
+        } catch {
+            // An account that cannot be written is an account that disappears on relaunch,
+            // which looks from the outside like the sign-in never worked.
+            Log.write("store: save failed — \(error.localizedDescription)")
+        }
     }
 
     /// Last known snapshots are cached only so the menu bar shows something on launch
