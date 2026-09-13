@@ -225,6 +225,7 @@ enum Probe {
 }
 
 import AppKit
+import SwiftUI
 
 extension Probe {
     /// Writes the menu-bar image to a PNG at 2x so its geometry can be measured against a
@@ -241,6 +242,35 @@ extension Probe {
         } catch {
             print("app icon failed: \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
         }
+    }
+
+    /// Renders the panel itself to a PNG, so its layout can be looked at without opening it.
+    /// Draws the real view against the real store, which is the only way the image and the app
+    /// cannot disagree.
+    @MainActor
+    static func renderPanel(path: String) {
+        let store = AccountStore()
+        // AppKit needs its application object before a view can be laid out, and the panel is
+        // laid out here on the real main thread rather than on the main queue: under
+        // `dispatchMain()` the two are not the same thread.
+        _ = NSApplication.shared
+        let view = NSHostingView(rootView: UsagePopover(store: store, engine: UsageEngine(store: store)))
+        view.appearance = NSAppearance(named: .darkAqua)
+        view.frame = NSRect(origin: .zero, size: view.fittingSize)
+        view.layoutSubtreeIfNeeded()
+
+        // A popover draws over a vibrant background; on a transparent one the tints read wrong.
+        let backing = NSView(frame: view.frame)
+        backing.wantsLayer = true
+        backing.layer?.backgroundColor = NSColor(calibratedWhite: 0.13, alpha: 1).cgColor
+        backing.appearance = NSAppearance(named: .darkAqua)
+        backing.addSubview(view)
+
+        guard let rep = backing.bitmapImageRepForCachingDisplay(in: backing.bounds) else { return }
+        backing.cacheDisplay(in: backing.bounds, to: rep)
+        guard let data = rep.representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: URL(fileURLWithPath: path))
+        print("wrote \(path) at \(Int(rep.size.width))x\(Int(rep.size.height))")
     }
 
     @MainActor
