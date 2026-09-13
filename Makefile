@@ -4,10 +4,12 @@ BIN     := .build/release/claudex
 ICONSET := build/$(APP).iconset
 ICNS    := build/$(APP).icns
 PLIST   := $(BUNDLE)/Contents/Info.plist
+DMGROOT := build/dmg
+DMG     := build/$(APP)-$(VERSION).dmg
 
 # Marketing version is set by hand; the build number is the commit count, which rises on every
 # commit and never repeats. macOS compares it when deciding whether a login item has changed.
-VERSION := 0.1.0
+VERSION ?= 0.1.0
 BUILD   := $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
 
 # swift-testing ships with the toolchain but sits outside the default search paths under
@@ -19,7 +21,7 @@ TESTFW   := $(wildcard $(DEVDIR)/Library/Developer/Frameworks)
 TESTLIB  := $(DEVDIR)/Library/Developer/usr/lib
 TESTARGS := $(if $(TESTFW),-Xswiftc -F -Xswiftc $(TESTFW) -Xlinker -rpath -Xlinker $(TESTFW) -Xlinker -rpath -Xlinker $(TESTLIB))
 
-.PHONY: all build test icon bundle install uninstall verify run prototype prototype-accounts clean
+.PHONY: all build test icon bundle dmg install uninstall verify run prototype prototype-accounts clean
 
 all: bundle
 
@@ -58,6 +60,16 @@ bundle: build icon
 verify: bundle
 	codesign --verify --deep --strict --verbose=2 $(BUNDLE)
 	@/usr/libexec/PlistBuddy -c "Print :CFBundleVersion" $(PLIST) | sed 's/^/build /'
+
+dmg: verify
+	rm -rf $(DMGROOT)
+	rm -f $(DMG)
+	mkdir -p $(DMGROOT)
+	cp -R $(BUNDLE) $(DMGROOT)/
+	ln -s /Applications $(DMGROOT)/Applications
+	hdiutil create -volname $(APP) -srcfolder $(DMGROOT) -ov -format UDZO $(DMG)
+	hdiutil verify $(DMG)
+	@echo "built $(DMG)"
 
 # SMAppService keys a login item to the bundle's location, so the app has to live somewhere
 # stable for "launch at login" to survive. /Applications is that place.

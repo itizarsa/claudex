@@ -11,8 +11,20 @@ API keys are rejected. Several accounts may share one email address.
 Requires the Xcode Command Line Tools. Xcode itself is not needed.
 
     make bundle     # build/Claudex.app
+    make dmg        # build/Claudex-0.1.0.dmg
     make install    # copy to /Applications
     make run        # rebuild and launch
+
+## Release
+
+Push a semantic-version tag to build and publish a GitHub Release:
+
+    git tag -a v0.1.0 -m "v0.1.0"
+    git push origin v0.1.0
+
+GitHub Actions runs tests, builds `Claudex-0.1.0.dmg`, and attaches it to the release. The Release
+DMG workflow can also be started manually with an existing tag. Builds are ad-hoc signed, not
+Developer ID signed or notarized.
 
 ## First run
 
