@@ -7,21 +7,21 @@ import Foundation
 /// directory nothing else reads, and claudex adopts what lands there. The account the CLI is
 /// signed into is never touched, so a sign-in cannot log the user out of the session they are
 /// in the middle of.
-enum SandboxedLogin {
+public enum SandboxedLogin {
     /// Long enough for a browser round trip including a password manager and an MFA prompt.
-    static let timeout: TimeInterval = 300
+    public static let timeout: TimeInterval = 300
     private static let pollInterval: TimeInterval = 1
 
-    struct Result {
-        let account: Account
-        let wasAlreadyKnown: Bool
+    public struct Result {
+        public let account: Account
+        public let wasAlreadyKnown: Bool
     }
 
     /// Runs the login and stores whatever it produces as an inactive account. Inactive on
     /// purpose: adding an account is not a request to switch to it, and switching is one click
     /// away in the panel.
     @MainActor
-    static func run(_ kind: ProviderKind, into store: AccountStore) async throws -> Result {
+    public static func run(_ kind: ProviderKind, into store: AccountStore) async throws -> Result {
         Log.write("login: starting \(kind.rawValue)")
         let directory = try makeDirectory()
         Log.write("login: config dir \(directory.path)")
@@ -127,7 +127,7 @@ enum SandboxedLogin {
 
     /// Holds the running login and everything it has said so far. The transcript is only read
     /// when the login fails, where it is the one explanation of why.
-    final class LoginProcess {
+    public final class LoginProcess {
         private let process: Process
         private let output: Pipe
         private let lock = NSLock()
@@ -275,7 +275,7 @@ enum SandboxedLogin {
 }
 
 private extension ProviderKind {
-    var executable: String {
+    public var executable: String {
         switch self {
         case .claude: return "claude"
         case .codex: return "codex"
@@ -284,7 +284,7 @@ private extension ProviderKind {
 
     /// `--claudeai` picks the subscription flow over the console/API-key one, which is the only
     /// flow claudex can read usage for.
-    var loginArguments: [String] {
+    public var loginArguments: [String] {
         switch self {
         case .claude: return ["auth", "login", "--claudeai"]
         case .codex: return ["login"]
@@ -294,7 +294,7 @@ private extension ProviderKind {
     /// Where the login is told to write. Claude Code 2.1.220 and later hash a second variable
     /// into their Keychain service name, so both have to point at the throwaway directory or the
     /// login lands on the account the CLI is already signed into.
-    func configEnvironment(_ directory: URL) -> [String: String] {
+    public func configEnvironment(_ directory: URL) -> [String: String] {
         switch self {
         case .claude:
             return [

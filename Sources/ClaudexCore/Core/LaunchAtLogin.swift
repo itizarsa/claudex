@@ -8,17 +8,17 @@ import ServiceManagement
 /// reported as `.notFound`; `make install` putting it in `/Applications` is what keeps that
 /// stable. Unavailable when running from the bare executable, where there is no bundle to
 /// register at all.
-enum LaunchAtLogin {
-    static var isAvailable: Bool {
+public enum LaunchAtLogin {
+    public static var isAvailable: Bool {
         Bundle.main.bundleIdentifier != nil && Bundle.main.bundleURL.pathExtension == "app"
     }
 
-    static var isEnabled: Bool {
+    public static var isEnabled: Bool {
         guard isAvailable else { return false }
         return SMAppService.mainApp.status == .enabled
     }
 
-    static func set(_ enabled: Bool) throws {
+    public static func set(_ enabled: Bool) throws {
         guard isAvailable else { return }
         if enabled {
             try SMAppService.mainApp.register()

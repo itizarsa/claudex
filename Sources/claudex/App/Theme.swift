@@ -1,3 +1,4 @@
+import ClaudexCore
 import SwiftUI
 
 /// One place for surface, type and spacing decisions so the popover and the ring agree.
@@ -102,6 +103,32 @@ extension Severity {
         case .calm: return .adaptiveGreen
         case .warm: return .systemOrange
         case .hot: return .usageRed
+        }
+    }
+}
+
+/// Pace colours. Six steps against severity's three, because pace is the reading that changes
+/// behaviour; the extra resolution is the point.
+extension Pace {
+    var tone: Color {
+        switch self {
+        case .comfortable: return .green
+        case .onTrack: return .teal
+        case .warming: return .yellow
+        case .pressing: return .orange
+        case .critical: return .red
+        case .runaway: return .purple
+        }
+    }
+
+    var toneNS: NSColor {
+        switch self {
+        case .comfortable: return .systemGreen
+        case .onTrack: return .systemTeal
+        case .warming: return .systemYellow
+        case .pressing: return .systemOrange
+        case .critical: return .systemRed
+        case .runaway: return .systemPurple
         }
     }
 }

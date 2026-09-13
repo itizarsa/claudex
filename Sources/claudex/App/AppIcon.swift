@@ -1,4 +1,5 @@
 import AppKit
+import ClaudexCore
 
 /// The Finder and notification icon, drawn rather than authored.
 ///

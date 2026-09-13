@@ -1,10 +1,10 @@
 import Foundation
 
-enum ProviderKind: String, Codable, CaseIterable, Sendable {
+public enum ProviderKind: String, Codable, CaseIterable, Sendable {
     case claude
     case codex
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .claude: return "Claude"
         case .codex: return "Codex"
@@ -14,37 +14,37 @@ enum ProviderKind: String, Codable, CaseIterable, Sendable {
 
 /// Who an account belongs to remotely. Purely descriptive: two accounts may carry the
 /// same email and differ only by `remoteID`, which is why `Account.id` is local.
-struct Identity: Codable, Equatable, Sendable {
-    var email: String
-    var displayName: String?
-    var plan: String
-    var organization: String?
+public struct Identity: Codable, Equatable, Sendable {
+    public var email: String
+    public var displayName: String?
+    public var plan: String
+    public var organization: String?
     /// The workspace the subscription lives in. One person can hold a personal Pro seat and
     /// a team seat under the same email and remote ID, and they are separate accounts here;
     /// the organisation is what tells them apart. Optional so older files still decode.
-    var organizationID: String?
-    var remoteID: String
+    public var organizationID: String?
+    public var remoteID: String
 }
 
-struct Account: Codable, Identifiable, Equatable, Sendable {
-    let id: UUID
-    var provider: ProviderKind
-    var label: String
+public struct Account: Codable, Identifiable, Equatable, Sendable {
+    public let id: UUID
+    public var provider: ProviderKind
+    public var label: String
     /// One or two characters for the menu bar ring. Optional in storage so older files still
     /// decode; `badge` supplies the fallback.
-    var alias: String?
-    var identity: Identity
-    var enabled: Bool
-    var order: Int
-    var addedAt: Date
+    public var alias: String?
+    public var identity: Identity
+    public var enabled: Bool
+    public var order: Int
+    public var addedAt: Date
 
     /// What the ring shows. Falls back to the first letter of the label.
-    var badge: String {
+    public var badge: String {
         if let alias, !alias.isEmpty { return String(alias.prefix(2)).uppercased() }
         return String(label.prefix(1)).uppercased()
     }
 
-    init(
+    public init(
         id: UUID = UUID(),
         provider: ProviderKind,
         label: String,
@@ -68,19 +68,25 @@ struct Account: Codable, Identifiable, Equatable, Sendable {
 /// A single rate-limit window. `percent` is optional on purpose: a window the API did not
 /// report is unknown, never zero. Treating a missing field as 0% would look like plenty of
 /// headroom and drive a wrong rotation decision.
-struct UsageWindow: Codable, Equatable, Sendable {
-    var percent: Double?
-    var resetsAt: Date?
+public struct UsageWindow: Codable, Equatable, Sendable {
+    public var percent: Double?
+    public var resetsAt: Date?
     /// Length of the window. Needed to place the time marker: without it, a reset time says
     /// nothing about how far through the window we are.
-    var windowSeconds: Double?
+    public var windowSeconds: Double?
 
-    static let unknown = UsageWindow(percent: nil, resetsAt: nil, windowSeconds: nil)
+    public init(percent: Double?, resetsAt: Date?, windowSeconds: Double?) {
+        self.percent = percent
+        self.resetsAt = resetsAt
+        self.windowSeconds = windowSeconds
+    }
+
+    public static let unknown = UsageWindow(percent: nil, resetsAt: nil, windowSeconds: nil)
 
     /// How far through the window the clock has travelled, 0 to 1. Compared against `fraction`
     /// this is the useful reading: usage ahead of the clock means burning faster than the
     /// window refills.
-    var elapsed: Double? {
+    public var elapsed: Double? {
         guard let resetsAt, let windowSeconds, windowSeconds > 0 else { return nil }
         let remaining = resetsAt.timeIntervalSinceNow
         guard remaining > 0 else { return 1 }
@@ -88,21 +94,27 @@ struct UsageWindow: Codable, Equatable, Sendable {
     }
 }
 
-struct UsageSnapshot: Codable, Equatable, Sendable {
-    var fiveHour: UsageWindow
-    var weekly: UsageWindow
-    var fetchedAt: Date
+public struct UsageSnapshot: Codable, Equatable, Sendable {
+    public var fiveHour: UsageWindow
+    public var weekly: UsageWindow
+    public var fetchedAt: Date
 
-    var isUsable: Bool { fiveHour.percent != nil || weekly.percent != nil }
+    public init(fiveHour: UsageWindow, weekly: UsageWindow, fetchedAt: Date) {
+        self.fiveHour = fiveHour
+        self.weekly = weekly
+        self.fetchedAt = fetchedAt
+    }
+
+    public var isUsable: Bool { fiveHour.percent != nil || weekly.percent != nil }
 }
 
-enum AccountState: Equatable, Sendable {
+public enum AccountState: Equatable, Sendable {
     case idle
     case loading
     case ok(UsageSnapshot)
     case failed(String)
 
-    var snapshot: UsageSnapshot? {
+    public var snapshot: UsageSnapshot? {
         if case .ok(let snapshot) = self { return snapshot }
         return nil
     }
@@ -110,32 +122,32 @@ enum AccountState: Equatable, Sendable {
 
 // MARK: - Credentials
 
-struct ClaudeCredentials: Codable, Equatable, Sendable {
-    var accessToken: String
-    var refreshToken: String
+public struct ClaudeCredentials: Codable, Equatable, Sendable {
+    public var accessToken: String
+    public var refreshToken: String
     /// Milliseconds since epoch, matching the on-disk format Claude Code writes.
-    var expiresAt: Int64
-    var refreshTokenExpiresAt: Int64?
-    var scopes: [String]
-    var subscriptionType: String?
-    var rateLimitTier: String?
+    public var expiresAt: Int64
+    public var refreshTokenExpiresAt: Int64?
+    public var scopes: [String]
+    public var subscriptionType: String?
+    public var rateLimitTier: String?
 
-    var expiryDate: Date { Date(timeIntervalSince1970: Double(expiresAt) / 1000) }
+    public var expiryDate: Date { Date(timeIntervalSince1970: Double(expiresAt) / 1000) }
 }
 
-struct CodexCredentials: Codable, Equatable, Sendable {
-    var idToken: String
-    var accessToken: String
-    var refreshToken: String
-    var accountID: String
-    var lastRefresh: Date?
+public struct CodexCredentials: Codable, Equatable, Sendable {
+    public var idToken: String
+    public var accessToken: String
+    public var refreshToken: String
+    public var accountID: String
+    public var lastRefresh: Date?
 }
 
-enum Credentials: Codable, Equatable, Sendable {
+public enum Credentials: Codable, Equatable, Sendable {
     case claude(ClaudeCredentials)
     case codex(CodexCredentials)
 
-    var kind: ProviderKind {
+    public var kind: ProviderKind {
         switch self {
         case .claude: return .claude
         case .codex: return .codex
@@ -144,7 +156,7 @@ enum Credentials: Codable, Equatable, Sendable {
 
     /// Stable fingerprint of the refresh token, used to recognise whether a stored account
     /// is the one the CLI currently holds without ever comparing secrets in the clear.
-    var refreshFingerprint: String {
+    public var refreshFingerprint: String {
         switch self {
         case .claude(let c): return Fingerprint.of(c.refreshToken)
         case .codex(let c): return Fingerprint.of(c.refreshToken)
@@ -152,14 +164,14 @@ enum Credentials: Codable, Equatable, Sendable {
     }
 }
 
-enum ClaudexError: LocalizedError {
+public enum ClaudexError: LocalizedError {
     case http(Int, String)
     case decoding(String)
     case unsupportedAccount(String)
     case notSignedIn(ProviderKind)
     case keychain(OSStatus)
 
-    var errorDescription: String? {
+    public var errorDescription: String? {
         switch self {
         case .http(let code, let body):
             return "HTTP \(code): \(body.prefix(160))"

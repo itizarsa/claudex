@@ -1,3 +1,4 @@
+import ClaudexCore
 import Foundation
 
 /// Small headless surface for setup and diagnostics. Without a flag the app launches as a

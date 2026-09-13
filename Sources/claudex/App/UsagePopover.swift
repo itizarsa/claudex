@@ -1,3 +1,4 @@
+import ClaudexCore
 import SwiftUI
 
 struct UsagePopover: View {

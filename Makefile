@@ -10,12 +10,24 @@ PLIST   := $(BUNDLE)/Contents/Info.plist
 VERSION := 0.1.0
 BUILD   := $(shell git rev-list --count HEAD 2>/dev/null || echo 1)
 
-.PHONY: all build icon bundle install uninstall verify run prototype clean
+# swift-testing ships with the toolchain but sits outside the default search paths under
+# Command Line Tools, and Testing.framework loads lib_TestingInterop.dylib by rpath. Naming
+# both directories is what turns "no such module 'Testing'" into a test run. Under a full
+# Xcode the frameworks are already on the path, so the flags stay empty there.
+DEVDIR   := $(shell xcode-select -p)
+TESTFW   := $(wildcard $(DEVDIR)/Library/Developer/Frameworks)
+TESTLIB  := $(DEVDIR)/Library/Developer/usr/lib
+TESTARGS := $(if $(TESTFW),-Xswiftc -F -Xswiftc $(TESTFW) -Xlinker -rpath -Xlinker $(TESTFW) -Xlinker -rpath -Xlinker $(TESTLIB))
+
+.PHONY: all build test icon bundle install uninstall verify run prototype clean
 
 all: bundle
 
 build:
 	swift build -c release
+
+test:
+	swift test $(TESTARGS)
 
 # The binary draws its own icon, so the mark cannot drift from the ring in the menu bar.
 icon: build

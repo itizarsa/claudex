@@ -4,8 +4,8 @@ import Foundation
 /// one line of notice; when a login does not land, that line is rarely enough to say why.
 ///
 /// Only the sign-in path writes here, so the file stays short enough to read by hand.
-enum Log {
-    static let url = URL(fileURLWithPath: NSHomeDirectory())
+public enum Log {
+    public static let url = URL(fileURLWithPath: NSHomeDirectory())
         .appending(path: "Library/Logs/claudex.log")
 
     private static let queue = DispatchQueue(label: "io.claudex.log")
@@ -17,7 +17,7 @@ enum Log {
         return formatter
     }()
 
-    static func write(_ message: String) {
+    public static func write(_ message: String) {
         let line = "\(stamp.string(from: Date())) \(message)\n"
         FileHandle.standardError.write(Data(line.utf8))
         queue.async {

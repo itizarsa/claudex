@@ -3,11 +3,11 @@ import Foundation
 /// Which limit window put an account over budget. Carried out of the decision so the
 /// notification can name it, and so "everything is over" is announced once per window rather
 /// than once per poll.
-enum LimitWindow: String, Sendable {
+public enum LimitWindow: String, Sendable {
     case fiveHour
     case weekly
 
-    var displayName: String {
+    public var displayName: String {
         switch self {
         case .fiveHour: return "5-hour"
         case .weekly: return "weekly"
@@ -15,7 +15,7 @@ enum LimitWindow: String, Sendable {
     }
 }
 
-enum RotationOutcome: Equatable, Sendable {
+public enum RotationOutcome: Equatable, Sendable {
     /// The active account is within budget, or there is nothing to compare it against.
     case stay
     case switchTo(UUID)
@@ -24,9 +24,9 @@ enum RotationOutcome: Equatable, Sendable {
     case blocked(LimitWindow)
 }
 
-struct RotationCandidate: Equatable, Sendable {
-    let account: Account
-    let snapshot: UsageSnapshot
+public struct RotationCandidate: Equatable, Sendable {
+    public let account: Account
+    public let snapshot: UsageSnapshot
 }
 
 /// Threshold evaluation, cooldown and the switch it drives.
@@ -36,12 +36,12 @@ struct RotationCandidate: Equatable, Sendable {
 /// pieces of state the rule cannot carry: when this provider last switched, and which
 /// "everything is over" message has already been sent.
 @MainActor
-final class Rotator {
+public final class Rotator {
     /// A snapshot older than this says nothing about the account's current headroom, so it
     /// disqualifies the account as a target rather than being trusted.
-    static let freshness: TimeInterval = 600
+    public static let freshness: TimeInterval = 600
     /// Two accounts sitting either side of the line would otherwise trade places every poll.
-    static let cooldown: TimeInterval = 60
+    public static let cooldown: TimeInterval = 60
 
     private let store: AccountStore
     private let notifier: Notifier
@@ -58,7 +58,7 @@ final class Rotator {
 
     /// True when a window is at or over its threshold. An unknown percentage is never over
     /// budget: the API not reporting a window is not evidence that it is full.
-    static func exceeded(_ snapshot: UsageSnapshot, _ thresholds: ProviderThresholds) -> LimitWindow? {
+    public static func exceeded(_ snapshot: UsageSnapshot, _ thresholds: ProviderThresholds) -> LimitWindow? {
         if let percent = snapshot.fiveHour.percent, percent >= thresholds.fiveHour { return .fiveHour }
         if let percent = snapshot.weekly.percent, percent >= thresholds.weekly { return .weekly }
         return nil
@@ -67,14 +67,14 @@ final class Rotator {
     /// A target must be demonstrably under both thresholds. An unknown window disqualifies it,
     /// because switching to an account whose usage cannot be read is a guess, and the one
     /// failure mode worth avoiding is treating a missing figure as headroom.
-    static func hasHeadroom(_ snapshot: UsageSnapshot, _ thresholds: ProviderThresholds) -> Bool {
+    public static func hasHeadroom(_ snapshot: UsageSnapshot, _ thresholds: ProviderThresholds) -> Bool {
         guard let fiveHour = snapshot.fiveHour.percent, let weekly = snapshot.weekly.percent else {
             return false
         }
         return fiveHour < thresholds.fiveHour && weekly < thresholds.weekly
     }
 
-    static func decide(
+    public static func decide(
         active: UsageSnapshot,
         candidates: [RotationCandidate],
         thresholds: ProviderThresholds,
@@ -108,13 +108,13 @@ final class Rotator {
 
     /// A manual switch is always allowed, and starts the cooldown afresh so the rotator does
     /// not immediately undo a choice the user just made by hand.
-    func noteManualSwitch(_ kind: ProviderKind) {
+    public func noteManualSwitch(_ kind: ProviderKind) {
         lastSwitch[kind] = Date()
         announcedBlock[kind] = nil
     }
 
     /// Called after every successful poll of a provider's active account.
-    func evaluate(_ kind: ProviderKind) async {
+    public func evaluate(_ kind: ProviderKind) async {
         guard store.settings.autoSwitchEnabled, !evaluating.contains(kind) else { return }
         guard let active = store.activeAccount(for: kind),
               let snapshot = store.state(active.id).snapshot

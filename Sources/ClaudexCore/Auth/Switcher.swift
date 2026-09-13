@@ -6,12 +6,12 @@ import Foundation
 /// tokens rotate: whichever copy is written last is the only one that still works. Harvest the
 /// outgoing account first, persist the incoming account's refreshed tokens before handing them
 /// to the CLI, and only then record the change.
-enum Switcher {
+public enum Switcher {
     /// Returns false when the account was already active, so a caller reporting the outcome can
     /// tell a switch from a no-op rather than announcing one for the other.
     @MainActor
     @discardableResult
-    static func activate(_ account: Account, in store: AccountStore) async throws -> Bool {
+    public static func activate(_ account: Account, in store: AccountStore) async throws -> Bool {
         guard !store.isActive(account) else { return false }
         let provider = Providers.of(account.provider)
 

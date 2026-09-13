@@ -2,49 +2,49 @@ import Foundation
 import Observation
 
 private struct PersistedAccounts: Codable {
-    var accounts: [Account]
-    var active: [ProviderKind: UUID]
+    public var accounts: [Account]
+    public var active: [ProviderKind: UUID]
 }
 
 @MainActor
 @Observable
-final class AccountStore {
+public final class AccountStore {
     private(set) var accounts: [Account] = []
     /// The account claudex believes each CLI is currently signed into.
     private(set) var active: [ProviderKind: UUID] = [:]
-    var states: [UUID: AccountState] = [:]
-    var settings: Settings = .load()
+    public var states: [UUID: AccountState] = [:]
+    public var settings: Settings = .load()
 
-    init() {
+    public init() {
         load()
     }
 
     // MARK: - Queries
 
-    func accounts(for kind: ProviderKind) -> [Account] {
+    public func accounts(for kind: ProviderKind) -> [Account] {
         accounts.filter { $0.provider == kind }.sorted { $0.order < $1.order }
     }
 
-    func account(_ id: UUID) -> Account? {
+    public func account(_ id: UUID) -> Account? {
         accounts.first { $0.id == id }
     }
 
-    func activeAccount(for kind: ProviderKind) -> Account? {
+    public func activeAccount(for kind: ProviderKind) -> Account? {
         active[kind].flatMap(account)
     }
 
-    func state(_ id: UUID) -> AccountState {
+    public func state(_ id: UUID) -> AccountState {
         states[id] ?? .idle
     }
 
-    func isActive(_ account: Account) -> Bool {
+    public func isActive(_ account: Account) -> Bool {
         active[account.provider] == account.id
     }
 
     /// True when the account already exists, matched on provider plus remote identity plus
     /// email plus organisation. Deliberately not email alone: several accounts may share one
     /// address, and the same person's personal and team seats also share a remote ID.
-    func existing(matching identity: Identity, kind: ProviderKind) -> Account? {
+    public func existing(matching identity: Identity, kind: ProviderKind) -> Account? {
         accounts.first {
             $0.provider == kind
                 && $0.identity.remoteID == identity.remoteID
@@ -56,7 +56,7 @@ final class AccountStore {
     // MARK: - Mutations
 
     @discardableResult
-    func add(identity: Identity, kind: ProviderKind, label: String, credentials: Credentials) throws -> Account {
+    public func add(identity: Identity, kind: ProviderKind, label: String, credentials: Credentials) throws -> Account {
         let nextOrder = (accounts(for: kind).map(\.order).max() ?? -1) + 1
         let account = Account(provider: kind, label: label, identity: identity, order: nextOrder)
         try Vault.store(credentials, for: account.id)
@@ -65,7 +65,7 @@ final class AccountStore {
         return account
     }
 
-    func update(_ account: Account) {
+    public func update(_ account: Account) {
         guard let index = accounts.firstIndex(where: { $0.id == account.id }) else { return }
         accounts[index] = account
         save()
@@ -74,14 +74,14 @@ final class AccountStore {
     /// The alias is what the menu-bar ring draws, and the ring has room for two characters at
     /// most. Clamping and casing here rather than at draw time keeps what is stored and what is
     /// shown the same string.
-    func setAlias(_ raw: String, for account: Account) {
+    public func setAlias(_ raw: String, for account: Account) {
         let cleaned = raw.trimmingCharacters(in: .whitespacesAndNewlines).prefix(2).uppercased()
         var updated = account
         updated.alias = cleaned.isEmpty ? nil : String(cleaned)
         update(updated)
     }
 
-    func remove(_ account: Account) {
+    public func remove(_ account: Account) {
         try? Vault.delete(account.id)
         accounts.removeAll { $0.id == account.id }
         if active[account.provider] == account.id { active[account.provider] = nil }
@@ -89,16 +89,16 @@ final class AccountStore {
         save()
     }
 
-    func setActive(_ account: Account) {
+    public func setActive(_ account: Account) {
         active[account.provider] = account.id
         save()
     }
 
-    func credentials(for account: Account) throws -> Credentials? {
+    public func credentials(for account: Account) throws -> Credentials? {
         try Vault.load(account.id)
     }
 
-    func storeCredentials(_ credentials: Credentials, for account: Account) throws {
+    public func storeCredentials(_ credentials: Credentials, for account: Account) throws {
         try Vault.store(credentials, for: account.id)
     }
 
@@ -113,7 +113,7 @@ final class AccountStore {
         loadCachedSnapshots()
     }
 
-    func save() {
+    public func save() {
         let payload = PersistedAccounts(accounts: accounts, active: active)
         guard let data = try? JSONEncoder.claudex.encode(payload) else {
             Log.write("store: could not encode \(accounts.count) account(s)")
@@ -132,7 +132,7 @@ final class AccountStore {
     /// Last known snapshots are cached only so the menu bar shows something on launch
     /// instead of a dash. They are never used for rotation decisions; `Rotator` requires a
     /// snapshot fetched within the freshness window.
-    func cacheSnapshots() {
+    public func cacheSnapshots() {
         let payload = states.compactMapValues(\.snapshot)
         guard let data = try? JSONEncoder.claudex.encode(payload) else { return }
         try? Paths.ensureSupportDirectory()

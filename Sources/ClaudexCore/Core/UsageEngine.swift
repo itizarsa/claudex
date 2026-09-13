@@ -13,10 +13,10 @@ import Observation
 /// Inactive accounts are owned by claudex and refreshed here.
 @MainActor
 @Observable
-final class UsageEngine {
+public final class UsageEngine {
     private let store: AccountStore
     let notifier: Notifier
-    let rotator: Rotator
+    public let rotator: Rotator
     private var timer: Timer?
     private var lastPolled: [UUID: Date] = [:]
     private var backoffUntil: [UUID: Date] = [:]
@@ -26,9 +26,9 @@ final class UsageEngine {
     private let refreshLeeway: TimeInterval = 300
     private let maxBackoff: TimeInterval = 15 * 60
 
-    var lastError: String?
+    public var lastError: String?
 
-    init(store: AccountStore) {
+    public init(store: AccountStore) {
         let notifier = Notifier()
         self.store = store
         self.notifier = notifier
@@ -37,7 +37,7 @@ final class UsageEngine {
 
     // MARK: - Lifecycle
 
-    func start() {
+    public func start() {
         stop()
         let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
             Task { @MainActor in self?.tick() }
@@ -63,16 +63,16 @@ final class UsageEngine {
         tick()
     }
 
-    func stop() {
+    public func stop() {
         timer?.invalidate()
         timer = nil
     }
 
     /// Whether a poll is in flight, so the panel can dim a card rather than tear it down.
-    func isPolling(_ id: UUID) -> Bool { inFlight.contains(id) }
+    public func isPolling(_ id: UUID) -> Bool { inFlight.contains(id) }
 
     /// Poll everything now, ignoring schedule and backoff.
-    func refreshAll() {
+    public func refreshAll() {
         lastPolled.removeAll()
         backoffUntil.removeAll()
         tick()

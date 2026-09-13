@@ -1,3 +1,4 @@
+import ClaudexCore
 import SwiftUI
 
 /// The provider's own mark, drawn from its published logo path rather than shipped as an

@@ -1,6 +1,6 @@
 import Foundation
 
-enum Formatting {
+public enum Formatting {
     private static let timeOnly: DateFormatter = {
         let formatter = DateFormatter()
         formatter.dateFormat = "h:mma"
@@ -18,7 +18,7 @@ enum Formatting {
     }()
 
     /// "Resets Today 10:00PM" / "Resets Tomorrow 2:15AM" / "Resets Sep 15, 12:30AM".
-    static func resetLine(_ date: Date?) -> String {
+    public static func resetLine(_ date: Date?) -> String {
         guard let date else { return "" }
         let calendar = Calendar.current
         if calendar.isDateInToday(date) { return "Resets Today \(timeOnly.string(from: date))" }
@@ -29,8 +29,8 @@ enum Formatting {
 
 /// Turns an error into something worth showing a person. Raw API bodies never reach the UI:
 /// a truncated JSON blob tells the user nothing they can act on.
-enum ErrorPresenter {
-    static func message(_ raw: String) -> String {
+public enum ErrorPresenter {
+    public static func message(_ raw: String) -> String {
         if raw.contains("HTTP 429") || raw.localizedCaseInsensitiveContains("rate limit") {
             return "Rate limited by the API. Retrying shortly."
         }
@@ -43,7 +43,7 @@ enum ErrorPresenter {
         return raw
     }
 
-    static func message(_ error: Error) -> String {
+    public static func message(_ error: Error) -> String {
         guard let claudexError = error as? ClaudexError else {
             return "Something went wrong: \(error.localizedDescription)"
         }

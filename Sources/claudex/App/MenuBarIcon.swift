@@ -1,4 +1,5 @@
 import AppKit
+import ClaudexCore
 
 /// The menu bar label is drawn into an NSImage rather than composed from SwiftUI shapes,
 /// because MenuBarExtra renders its label through the status item and does not lay out

@@ -1,3 +1,4 @@
+import ClaudexCore
 import ServiceManagement
 import SwiftUI
 
@@ -115,7 +116,7 @@ struct SettingsPanel: View {
     // MARK: - Bindings
 
     /// Toggles and pickers commit one value at a time, so each write is also a save.
-    private func setting<Value>(_ keyPath: WritableKeyPath<Settings, Value>) -> Binding<Value> {
+    private func setting<Value>(_ keyPath: WritableKeyPath<ClaudexCore.Settings, Value>) -> Binding<Value> {
         Binding(
             get: { store.settings[keyPath: keyPath] },
             set: { store.settings[keyPath: keyPath] = $0; store.settings.save() }
