@@ -46,6 +46,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         } else {
             // NSPopover centres its arrow on this rect, keeping the panel centred beneath
             // the menu-bar item regardless of panel width.
+            // A status item click does not activate an accessory app, and an inactive app's
+            // popover window cannot become key — which leaves every control in it inert: the
+            // clicks arrive and SwiftUI drops them. Activating first is what makes the buttons
+            // and the alias field work at all.
+            NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
             // The item stays lit for as long as the panel is open, which is what tells you

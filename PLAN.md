@@ -252,6 +252,12 @@ figures below were measured off 2x screenshots of it, pixel by pixel, not copied
 the ring from a menu-bar capture where its item sits beside ours, the palette and bar from a
 capture of its popover. Point values are the pixel measurements halved.
 
+The app activates itself when the panel opens. A status item click does not activate an accessory
+app, and the popover window of an inactive app cannot become key; every control inside it then
+looks normal, receives the click and does nothing, which is how the "+" button came to appear
+dead. Pressing it through the accessibility API worked, which is what separated a dead action
+from an undelivered click.
+
 ### Menu-bar ring
 
 Matched to the reference, with one deliberate exception: **no weekly underline bar.** The
