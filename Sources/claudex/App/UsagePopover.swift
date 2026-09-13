@@ -232,14 +232,21 @@ struct AccountCard: View {
     private var header: some View {
         HStack(spacing: 8) {
             aliasControl
-            Text(account.label)
-                .font(Theme.accountName)
-                .foregroundStyle(Theme.primaryText)
-                .lineLimit(1)
-            Text(account.identity.plan)
-                .font(Theme.plan)
-                .foregroundStyle(Theme.tertiaryText)
-                .lineLimit(1)
+            // Two lines rather than one run of text: the organisation is the name of the
+            // account, and the plan and the email below it are the fine print that says
+            // which seat it is. On one line they competed for the same weight.
+            VStack(alignment: .leading, spacing: 1) {
+                Text(account.label)
+                    .font(Theme.accountName)
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                Text(subtitle)
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.tertiaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+            }
             Spacer(minLength: 4)
             // One slot, three readings: where the account is live, that it is being made live,
             // or — under the pointer — that it can be.
@@ -251,6 +258,11 @@ struct AccountCard: View {
                 Tag(text: "Switch")
             }
         }
+    }
+
+    private var subtitle: String {
+        let email = account.identity.email
+        return email.isEmpty ? account.identity.plan : "\(account.identity.plan) · \(email)"
     }
 
     /// The badge is the only place the menu-bar alias is visible, so it is also where it is
@@ -328,19 +340,14 @@ struct WindowRow: View {
     let emphasis: Bool
 
     var body: some View {
+        // Both windows are drawn the same way — label, percentage, bar, caption — so the two
+        // rows of a card read as one table. A window with no reset time still gets its caption
+        // line, otherwise the session row sat higher than the weekly row under it.
         VStack(alignment: .leading, spacing: 5) {
             HStack(alignment: .firstTextBaseline) {
                 Text(label)
                     .font(Theme.windowLabel)
-                    .foregroundStyle(Theme.primaryText)
-                if !emphasis {
-                    Text("Weekly")
-                        .font(Theme.pill)
-                        .foregroundStyle(Theme.secondaryText)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(Capsule().fill(Color.primary.opacity(0.08)))
-                }
+                    .foregroundStyle(emphasis ? Theme.primaryText : Theme.secondaryText)
                 Spacer()
                 Text(window.percentText)
                     .font(Theme.percent(Theme.percentSize))
@@ -349,12 +356,18 @@ struct WindowRow: View {
 
             UsageBar(window: window)
 
-            if !window.resetText.isEmpty {
-                Text(window.resetText)
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.secondaryText)
-            }
+            Text(caption)
+                .font(Theme.caption)
+                .foregroundStyle(Theme.secondaryText)
         }
+    }
+
+    /// The five-hour window has no reset time until the first message opens it — the API
+    /// returns `resets_at: null` — so there is no clock to show, and assuming five hours from
+    /// now would put a time on the card that the next message immediately makes wrong.
+    private var caption: String {
+        let reset = window.resetText
+        return reset.isEmpty ? "Starts with the next message" : reset
     }
 }
 

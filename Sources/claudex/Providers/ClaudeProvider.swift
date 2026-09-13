@@ -85,6 +85,7 @@ struct ClaudeProvider: Provider {
             displayName: account["display_name"].string ?? account["full_name"].string,
             plan: plan,
             organization: organization["name"].string,
+            organizationID: organization["uuid"].string,
             remoteID: uuid
         )
     }

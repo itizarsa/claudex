@@ -70,6 +70,7 @@ struct CodexProvider: Provider {
             displayName: claims["name"].string,
             plan: plan.capitalized,
             organization: organization?["title"].string,
+            organizationID: organization?["id"].string,
             remoteID: accountID
         )
     }

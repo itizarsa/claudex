@@ -19,6 +19,10 @@ struct Identity: Codable, Equatable, Sendable {
     var displayName: String?
     var plan: String
     var organization: String?
+    /// The workspace the subscription lives in. One person can hold a personal Pro seat and
+    /// a team seat under the same email and remote ID, and they are separate accounts here;
+    /// the organisation is what tells them apart. Optional so older files still decode.
+    var organizationID: String?
     var remoteID: String
 }
 

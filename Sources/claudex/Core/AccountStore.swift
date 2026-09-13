@@ -42,12 +42,14 @@ final class AccountStore {
     }
 
     /// True when the account already exists, matched on provider plus remote identity plus
-    /// email. Deliberately not email alone: several accounts may share one address.
+    /// email plus organisation. Deliberately not email alone: several accounts may share one
+    /// address, and the same person's personal and team seats also share a remote ID.
     func existing(matching identity: Identity, kind: ProviderKind) -> Account? {
         accounts.first {
             $0.provider == kind
                 && $0.identity.remoteID == identity.remoteID
                 && $0.identity.email == identity.email
+                && $0.identity.organizationID == identity.organizationID
         }
     }
 
@@ -106,7 +108,7 @@ final class AccountStore {
         guard let data = try? Data(contentsOf: Paths.accountsFile),
               let decoded = try? JSONDecoder.claudex.decode(PersistedAccounts.self, from: data)
         else { return }
-        accounts = decoded.accounts
+        accounts = AccountLabel.relabel(decoded.accounts)
         active = decoded.active
         loadCachedSnapshots()
     }
