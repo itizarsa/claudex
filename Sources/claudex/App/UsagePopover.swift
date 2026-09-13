@@ -6,11 +6,16 @@ struct UsagePopover: View {
     @State private var notice: String?
     @State private var busyProvider: ProviderKind?
     @State private var switchingAccount: UUID?
+    @State private var showingSettings = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
-            ForEach(ProviderKind.allCases, id: \.self) { kind in
-                section(kind)
+            if showingSettings {
+                SettingsPanel(store: store) { showingSettings = false }
+            } else {
+                ForEach(ProviderKind.allCases, id: \.self) { kind in
+                    section(kind)
+                }
             }
 
             if let notice {
@@ -28,6 +33,7 @@ struct UsagePopover: View {
         .frame(width: Theme.popoverWidth)
         .background(Theme.popoverTint)
         .background(VisualEffectBackground())
+        .animation(Theme.transition, value: showingSettings)
     }
 
     // MARK: - Sections
@@ -86,6 +92,14 @@ struct UsagePopover: View {
                     engine.refreshAll()
                 }
                 Spacer()
+                IconButton(
+                    systemName: "gearshape",
+                    help: showingSettings ? "Back to accounts" : "Thresholds, notifications, startup"
+                ) {
+                    notice = nil
+                    showingSettings.toggle()
+                }
+                Spacer()
                 TextButton(title: "Quit") { NSApplication.shared.terminate(nil) }
             }
         }
@@ -104,6 +118,9 @@ struct UsagePopover: View {
             defer { switchingAccount = nil }
             do {
                 try await Switcher.activate(account, in: store)
+                // A choice made by hand outranks the rule, and starts the cooldown afresh so
+                // the rotator does not undo it on the next poll.
+                engine.rotator.noteManualSwitch(account.provider)
                 engine.refreshAll()
             } catch {
                 notice = ErrorPresenter.message(error)

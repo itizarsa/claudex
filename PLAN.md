@@ -101,6 +101,7 @@ app; with flags it runs headless:
     claudex --vault    # round-trip a throwaway credential through the vault
     claudex --import   # adopt whatever the CLIs are signed into
     claudex --poll     # one poll cycle through the vault, printing each step
+    claudex --rotate   # poll, then print what the rotation rule would do. Switches nothing
     claudex --list     # stored accounts and last known usage
 
 `--probe` in particular is how to check, in one second, whether the undocumented usage
@@ -126,6 +127,7 @@ endpoints still return the shape this app expects.
           Poller.swift            # timer, staggering, backoff
           Rotator.swift           # threshold evaluation, target selection
           Notifier.swift          # UNUserNotificationCenter
+          LaunchAtLogin.swift     # SMAppService.mainApp
         Providers/
           Provider.swift          # protocol
           ClaudeProvider.swift
@@ -202,7 +204,8 @@ Evaluated after every successful poll of the active account:
 4. Call `activate`, mark it active, post a notification naming the old and new account and
    reminding that running sessions keep the old one.
 5. If no candidate qualifies, do nothing and post one "all accounts over threshold"
-   notification per limit window, not once per poll.
+   notification per limit window, not once per poll. The window's own reset time is the key:
+   a new five-hour window is a new situation, the same one is not.
 
 A 60-second cooldown after any switch prevents flapping when two accounts sit near the line.
 Manual switch from the popover is always allowed and resets the cooldown.
@@ -371,8 +374,29 @@ Writing an item another application owns turned out to cost nothing either. Veri
 updated through `security` with no authorisation prompt, and a subsequent read returned the new
 credentials. Nothing about the Keychain now distinguishes claudex's own items from a CLI's.
 
-Phase 3 — automation. Rotator, thresholds in settings, cooldown, notifications, launch at
-login via `SMAppService`.
+Phase 3 — automation. **Done.** `Rotator` evaluates after every successful poll of a
+provider's active account, `--rotate` prints the same decision without acting on it, and the
+popover's gear opens the settings that drive it.
+
+`Rotator.decide` is pure and takes its clock as an argument, so the rule can be read without a
+store, a socket or a timer behind it; the class around it holds only what the rule cannot
+carry, which is when each provider last switched and which exhaustion notice has already been
+sent. Two readings are deliberately asymmetric: an unknown percentage never counts as over
+budget, because a window the API failed to report is not evidence that it is full, and it never
+qualifies an account as a target either, because it is not evidence of headroom. A stale
+snapshot disqualifies a target for the same reason.
+
+Notifications go through `Notifier`, which gates every call on the process having an
+application bundle — `UNUserNotificationCenter.current()` raises without one, and the headless
+flags run from the bare executable. `LaunchAtLogin` wraps `SMAppService.mainApp` behind the
+same gate, and reports a refusal in the panel rather than leaving a toggle claiming something
+that did not happen.
+
+The settings live in the popover rather than a window: every control here is one line, and a
+separate window for that is a second thing to find and close. Sliders write to memory as they
+move and to disk when the drag ends; toggles and pickers save on the spot. `Settings.allowKeychain`
+stays without UI on purpose — switching it off strands accounts whose tokens are already in the
+Keychain, so it remains a file-level escape hatch.
 
 Phase 4 — in-app sign-in. Spawn the CLI's own login against a throwaway config directory
 (`CLAUDE_CONFIG_DIR` for Claude, `CODEX_HOME` for Codex), import the credential it writes there,

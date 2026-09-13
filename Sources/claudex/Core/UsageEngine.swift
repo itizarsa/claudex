@@ -15,6 +15,8 @@ import Observation
 @Observable
 final class UsageEngine {
     private let store: AccountStore
+    let notifier: Notifier
+    let rotator: Rotator
     private var timer: Timer?
     private var lastPolled: [UUID: Date] = [:]
     private var backoffUntil: [UUID: Date] = [:]
@@ -27,7 +29,10 @@ final class UsageEngine {
     var lastError: String?
 
     init(store: AccountStore) {
+        let notifier = Notifier()
         self.store = store
+        self.notifier = notifier
+        self.rotator = Rotator(store: store, notifier: notifier)
     }
 
     // MARK: - Lifecycle
@@ -39,6 +44,8 @@ final class UsageEngine {
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
+
+        notifier.prepare()
 
         NotificationCenter.default.addObserver(
             forName: NSWorkspace.didWakeNotification,
@@ -107,6 +114,13 @@ final class UsageEngine {
             store.cacheSnapshots()
             failureCount[account.id] = nil
             backoffUntil[account.id] = nil
+
+            // Rotation is evaluated off the active account's reading, because that is the only
+            // account whose usage can put the CLI over budget. Inactive readings matter only as
+            // candidates, and the rotator reads those from the store itself.
+            if store.isActive(account) {
+                await rotator.evaluate(account.provider)
+            }
         } catch {
             handle(error, for: account)
         }

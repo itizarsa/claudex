@@ -85,7 +85,11 @@ enum Probe {
     /// binary it is run from.
     @MainActor
     static func pollOnce() async {
-        let store = AccountStore()
+        await pollOnce(into: AccountStore())
+    }
+
+    @MainActor
+    static func pollOnce(into store: AccountStore) async {
         guard !store.accounts.isEmpty else {
             print("no accounts; run --import first")
             return
@@ -139,6 +143,61 @@ enum Probe {
             print("  CLI reads back: \(matches ? "same credentials" : "MISMATCH")")
         } catch {
             print("switch failed: \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
+        }
+    }
+
+    /// Dry run of the rotation rule: polls everything, then prints what the rotator would do
+    /// with those readings and why. Never switches, so the thresholds can be tuned against live
+    /// numbers without the tuning itself moving an account.
+    @MainActor
+    static func rotationPlan() async {
+        let store = AccountStore()
+        guard !store.accounts.isEmpty else {
+            print("no accounts; run --import first")
+            return
+        }
+        await pollOnce(into: store)
+
+        let now = Date()
+        for kind in ProviderKind.allCases where !store.accounts(for: kind).isEmpty {
+            let thresholds = store.settings.thresholds(for: kind)
+            print("== \(kind.displayName) == thresholds 5h \(Int(thresholds.fiveHour))% / week \(Int(thresholds.weekly))%")
+
+            guard let active = store.activeAccount(for: kind) else {
+                print("  no active account")
+                continue
+            }
+            guard let snapshot = store.state(active.id).snapshot else {
+                print("  \(active.label) has no usable reading")
+                continue
+            }
+            // A poll that failed above leaves the cached reading in place, and a decision made
+            // on a stale number is worth knowing about before the thresholds are blamed.
+            let age = now.timeIntervalSince(snapshot.fetchedAt)
+            if age > 60 {
+                print("  note: \(active.label)'s reading is \(Int(age / 60))m old")
+            }
+
+            let candidates = store.accounts(for: kind)
+                .filter { $0.enabled && $0.id != active.id }
+                .compactMap { account in
+                    store.state(account.id).snapshot.map {
+                        RotationCandidate(account: account, snapshot: $0)
+                    }
+                }
+
+            switch Rotator.decide(active: snapshot, candidates: candidates, thresholds: thresholds, now: now) {
+            case .stay:
+                print("  stay on \(active.label) (5h \(snapshot.fiveHour.percentText), week \(snapshot.weekly.percentText))")
+            case .blocked(let window):
+                print("  \(active.label) is over its \(window.displayName) limit, and no candidate has headroom")
+            case .switchTo(let id):
+                let target = store.account(id)?.label ?? id.uuidString
+                print("  would switch \(active.label) -> \(target)")
+            }
+            if !store.settings.autoSwitchEnabled {
+                print("  (automatic switching is off, so nothing would happen)")
+            }
         }
     }
 

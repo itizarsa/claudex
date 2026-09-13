@@ -13,6 +13,9 @@ struct Settings: Codable, Equatable, Sendable {
     var idlePollSeconds: Double
     var autoSwitchEnabled: Bool
     var showLabelInMenuBar: Bool
+    /// Switch and exhaustion notices. Off silences the rotator without stopping it, so an
+    /// automatic switch still happens; it just happens quietly.
+    var notificationsEnabled: Bool = true
     /// Master switch for every Keychain call in the app. On, because claudex reaches the
     /// Keychain through `/usr/bin/security`, which is Apple-signed and so raises none of the
     /// authorisation prompts that in-process `SecItem` calls do from an ad-hoc signed build.
@@ -25,6 +28,7 @@ struct Settings: Codable, Equatable, Sendable {
         idlePollSeconds: 300,
         autoSwitchEnabled: false,
         showLabelInMenuBar: false,
+        notificationsEnabled: true,
         allowKeychain: true
     )
 
