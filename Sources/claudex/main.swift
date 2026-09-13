@@ -17,6 +17,10 @@ if !arguments.isEmpty {
         }
         if arguments.contains("--poll") { await Probe.pollOnce() }
         if arguments.contains("--rotate") { await Probe.rotationPlan() }
+        if let index = CommandLine.arguments.firstIndex(of: "--login"),
+           index + 1 < CommandLine.arguments.count {
+            await Probe.login(CommandLine.arguments[index + 1])
+        }
         if arguments.contains("--list") { await Probe.list() }
         if let index = CommandLine.arguments.firstIndex(of: "--icon"),
            index + 4 < CommandLine.arguments.count {

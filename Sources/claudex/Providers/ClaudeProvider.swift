@@ -145,6 +145,12 @@ struct ClaudeProvider: Provider {
             return nil
         }
 
+        return try Self.parse(data)
+    }
+
+    /// The shape of Claude Code's credential store, wherever it was read from: the CLI's own
+    /// file, its Keychain item, or the throwaway config directory a sandboxed sign-in writes.
+    static func parse(_ data: Data) throws -> Credentials? {
         let json = try JSONView.parse(data)["claudeAiOauth"]
         guard let accessToken = json["accessToken"].string,
               let refreshToken = json["refreshToken"].string

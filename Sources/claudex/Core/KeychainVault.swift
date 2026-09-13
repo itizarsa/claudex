@@ -45,6 +45,12 @@ enum ClaudeCLIKeychain {
     private static var account: String { NSUserName() }
 
     static func readRaw() throws -> Data? {
+        try readRaw(service: service)
+    }
+
+    /// A sign-in run against a throwaway `CLAUDE_CONFIG_DIR` lands in its own item, so the
+    /// service name is a parameter rather than the constant above.
+    static func readRaw(service: String) throws -> Data? {
         guard Vault.useKeychain else { return nil }
         let output = try SecurityCLI.run(["find-generic-password", "-s", service, "-a", account, "-w"])
         if output.exitCode == SecurityCLI.itemNotFound { return nil }
@@ -53,6 +59,32 @@ enum ClaudeCLIKeychain {
         }
         let trimmed = output.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines)
         return decodeSecurityOutput(trimmed)
+    }
+
+    /// Every `Claude Code-credentials` item in the keychain, including the suffixed ones.
+    ///
+    /// Claude Code appends a hash of its config directory to the service name, so a sign-in run
+    /// against a throwaway directory writes an item under a name claudex cannot compute.
+    /// Comparing this set before and after the login is what identifies it. `dump-keychain`
+    /// without `-d` prints attributes only, so no secret is read and no prompt is raised.
+    static func credentialServices() throws -> Set<String> {
+        let output = try SecurityCLI.run(["dump-keychain"])
+        guard output.exitCode == 0 else { return [] }
+
+        var found: Set<String> = []
+        for line in output.standardOutput.split(separator: "\n") {
+            guard let range = line.range(of: "\"svce\"<blob>=\"") else { continue }
+            let rest = line[range.upperBound...]
+            guard let end = rest.lastIndex(of: "\"") else { continue }
+            let name = String(rest[..<end])
+            if name.hasPrefix(service) { found.insert(name) }
+        }
+        return found
+    }
+
+    static func delete(service: String) throws {
+        guard Vault.useKeychain else { return }
+        _ = try SecurityCLI.run(["delete-generic-password", "-s", service, "-a", account])
     }
 
     /// Unlike claudex's own items this value cannot be base64-wrapped — Claude Code expects the

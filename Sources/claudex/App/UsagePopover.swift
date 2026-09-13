@@ -7,6 +7,7 @@ struct UsagePopover: View {
     @State private var busyProvider: ProviderKind?
     @State private var switchingAccount: UUID?
     @State private var showingSettings = false
+    @State private var signingIn: ProviderKind?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -51,12 +52,24 @@ struct UsagePopover: View {
                 IconButton(systemName: "plus", help: "Add the account this CLI is signed into") {
                     importCurrent(kind)
                 }
-                .disabled(busyProvider != nil)
+                .disabled(isBusy)
+                IconButton(
+                    systemName: "person.badge.plus",
+                    help: "Sign in to another \(kind.displayName) account in a Terminal window"
+                ) {
+                    signIn(kind)
+                }
+                .disabled(isBusy)
             }
             .padding(.leading, 2)
 
             if accounts.isEmpty {
-                EmptyProviderCard(kind: kind, busy: busyProvider == kind) { importCurrent(kind) }
+                EmptyProviderCard(
+                    kind: kind,
+                    busy: busyProvider == kind || signingIn == kind,
+                    onImport: { importCurrent(kind) },
+                    onSignIn: { signIn(kind) }
+                )
             } else {
                 VStack(spacing: 6) {
                     ForEach(accounts) { account in
@@ -121,6 +134,29 @@ struct UsagePopover: View {
                 // A choice made by hand outranks the rule, and starts the cooldown afresh so
                 // the rotator does not undo it on the next poll.
                 engine.rotator.noteManualSwitch(account.provider)
+                engine.refreshAll()
+            } catch {
+                notice = ErrorPresenter.message(error)
+            }
+        }
+    }
+
+    private var isBusy: Bool { busyProvider != nil || signingIn != nil }
+
+    /// The CLI's own login runs in a Terminal window against a throwaway config directory, so
+    /// the account currently signed in is untouched and claudex owns no OAuth code. The new
+    /// account is added inactive: adding is not a request to switch.
+    private func signIn(_ kind: ProviderKind) {
+        guard !isBusy else { return }
+        signingIn = kind
+        notice = "Finish the sign-in in the Terminal window. Claudex is waiting for it."
+        Task {
+            defer { signingIn = nil }
+            do {
+                let result = try await SandboxedLogin.run(kind, into: store)
+                notice = result.wasAlreadyKnown
+                    ? "\(result.account.label) was already tracked. Its credentials are up to date."
+                    : "Added \(result.account.label). It is not active — switch to it when you want it."
                 engine.refreshAll()
             } catch {
                 notice = ErrorPresenter.message(error)
@@ -410,7 +446,8 @@ struct SkeletonRow: View {
 struct EmptyProviderCard: View {
     let kind: ProviderKind
     let busy: Bool
-    let action: () -> Void
+    let onImport: () -> Void
+    let onSignIn: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -424,8 +461,12 @@ struct EmptyProviderCard: View {
                 .foregroundStyle(Theme.secondaryText)
                 .fixedSize(horizontal: false, vertical: true)
 
-            TextButton(title: busy ? "Adding…" : "Add current account", action: action)
-                .disabled(busy)
+            HStack(spacing: 4) {
+                TextButton(title: busy ? "Adding…" : "Add current account", action: onImport)
+                    .disabled(busy)
+                TextButton(title: "Sign in", action: onSignIn)
+                    .disabled(busy)
+            }
         }
         .padding(.horizontal, Theme.cardPaddingH)
         .padding(.vertical, Theme.cardPaddingV)

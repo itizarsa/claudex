@@ -201,6 +201,27 @@ enum Probe {
         }
     }
 
+    /// Headless equivalent of the popover's "Sign in". Opens the CLI's own login in a Terminal
+    /// window against a throwaway directory and adopts whatever it writes there, leaving the
+    /// account the CLI is signed into alone.
+    @MainActor
+    static func login(_ name: String) async {
+        guard let kind = ProviderKind(rawValue: name.lowercased()) else {
+            print("unknown provider \(name); use claude or codex")
+            return
+        }
+        let store = AccountStore()
+        print("opening a Terminal window for the \(kind.displayName) sign-in…")
+        do {
+            let result = try await SandboxedLogin.run(kind, into: store)
+            let status = result.wasAlreadyKnown ? "updated" : "added"
+            print("\(status) \(result.account.label) (\(result.account.identity.email), \(result.account.identity.plan))")
+            print("  not active; run --switch \(result.account.label) to sign the CLI into it")
+        } catch {
+            print("sign-in failed: \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
+        }
+    }
+
     @MainActor
     static func list() {
         let store = AccountStore()

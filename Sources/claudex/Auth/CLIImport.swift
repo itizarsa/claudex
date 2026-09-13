@@ -34,7 +34,7 @@ enum CLIImport {
     /// Email alone is a poor label when several accounts share one address, so fall back to
     /// the organisation, then to a numbered suffix.
     @MainActor
-    private static func suggestedLabel(for identity: Identity, kind: ProviderKind, store: AccountStore) -> String {
+    static func suggestedLabel(for identity: Identity, kind: ProviderKind, store: AccountStore) -> String {
         let siblings = store.accounts(for: kind)
         let base = identity.email.split(separator: "@").first.map(String.init) ?? identity.email
 

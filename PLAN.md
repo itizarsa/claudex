@@ -102,6 +102,7 @@ app; with flags it runs headless:
     claudex --import   # adopt whatever the CLIs are signed into
     claudex --poll     # one poll cycle through the vault, printing each step
     claudex --rotate   # poll, then print what the rotation rule would do. Switches nothing
+    claudex --login <claude|codex>   # run the CLI's own login in a throwaway config dir
     claudex --list     # stored accounts and last known usage
 
 `--probe` in particular is how to check, in one second, whether the undocumented usage
@@ -398,12 +399,27 @@ move and to disk when the drag ends; toggles and pickers save on the spot. `Sett
 stays without UI on purpose — switching it off strands accounts whose tokens are already in the
 Keychain, so it remains a file-level escape hatch.
 
-Phase 4 — in-app sign-in. Spawn the CLI's own login against a throwaway config directory
-(`CLAUDE_CONFIG_DIR` for Claude, `CODEX_HOME` for Codex), import the credential it writes there,
-then delete the directory and its Keychain item. The active account is never disturbed and
-claudex owns no OAuth code. tokenmaxx does exactly this, which is worth more than the PKCE
-flows originally planned here: no loopback listener, no code verifier, and no client ids to
-keep current. `PKCE.swift` and `LoopbackServer.swift` drop out of the architecture.
+Phase 4 — in-app sign-in. **Done.** `SandboxedLogin` runs the CLI's own login against a
+throwaway config directory — `CLAUDE_CONFIG_DIR` for `claude auth login --claudeai`, `CODEX_HOME`
+for `codex login` — and adopts whatever lands there. Verified on 2026-09-12 that both CLIs read a
+fresh directory as signed out, which is what keeps the live account out of the flow. `PKCE.swift`
+and `LoopbackServer.swift` never existed and are not coming: no loopback listener, no code
+verifier, no client ids to keep current.
+
+Both logins are interactive, and a menu bar app has no terminal to hand them, so the command goes
+to Terminal.app and claudex watches the directory rather than the process. The user sees what the
+CLI says when something goes wrong, which a captured pipe would swallow.
+
+Claude Code derives its Keychain service name from the config directory, so a sandboxed login
+leaves an item under a name claudex cannot compute. The set of `Claude Code-credentials…`
+services is recorded before the login and diffed after it; whichever is new is the one to read
+and then delete. `security dump-keychain` without `-d` lists attributes only, so that costs no
+secret and no prompt. The directory's `.credentials.json` is still tried first, since it is there
+whenever the CLI writes both.
+
+The new account is stored **inactive**. Adding an account is not a request to switch to it, and
+the switch is one click away in the panel. Gating is unchanged and happens before anything is
+stored, because it lives in `fetchIdentity`.
 
 Phase 5 — packaging. `xcodebuild` release, ad-hoc signature, a `make install` that drops
 the bundle in `/Applications`. Sparkle is deliberately left out until there is a second

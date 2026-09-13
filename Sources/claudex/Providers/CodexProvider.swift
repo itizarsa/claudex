@@ -113,6 +113,12 @@ struct CodexProvider: Provider {
 
     func readCurrentCLICredentials() throws -> Credentials? {
         guard let data = try? Data(contentsOf: Paths.codexAuth) else { return nil }
+        return try Self.parse(data)
+    }
+
+    /// The shape of `auth.json`, wherever it was read from: the CLI's own `~/.codex`, or the
+    /// throwaway `CODEX_HOME` a sandboxed sign-in writes.
+    static func parse(_ data: Data) throws -> Credentials? {
         let json = try JSONView.parse(data)
 
         guard json["auth_mode"].string == "chatgpt" else {
