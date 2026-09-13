@@ -248,6 +248,18 @@ extension Probe {
     /// screenshot of the app it is modelled on. Each argument takes a comma-separated list, one
     /// element per ring, so the grouped layout can be checked too. Diagnostics only; nothing in
     /// the app calls it.
+    /// Writes the app icon at 1024 so `make icon` can hand it to `iconutil`. Drawn by the same
+    /// binary that draws the ring, so the two cannot drift apart.
+    @MainActor
+    static func renderAppIcon(path: String) {
+        do {
+            try AppIcon.write(to: path)
+            print("wrote \(path)")
+        } catch {
+            print("app icon failed: \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
+        }
+    }
+
     @MainActor
     static func renderIcon(path: String, alias: String, percent: String, elapsed: String) {
         let aliases = alias.split(separator: ",").map(String.init)

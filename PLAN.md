@@ -104,6 +104,7 @@ app; with flags it runs headless:
     claudex --rotate   # poll, then print what the rotation rule would do. Switches nothing
     claudex --login <claude|codex>   # run the CLI's own login in a throwaway config dir
     claudex --list     # stored accounts and last known usage
+    claudex --appicon <path>         # write the app icon at 1024, for make icon
 
 `--probe` in particular is how to check, in one second, whether the undocumented usage
 endpoints still return the shape this app expects.
@@ -421,9 +422,25 @@ The new account is stored **inactive**. Adding an account is not a request to sw
 the switch is one click away in the panel. Gating is unchanged and happens before anything is
 stored, because it lives in `fetchIdentity`.
 
-Phase 5 — packaging. `xcodebuild` release, ad-hoc signature, a `make install` that drops
-the bundle in `/Applications`. Sparkle is deliberately left out until there is a second
-user.
+Phase 5 — packaging. **Done.** `make bundle` assembles the `.app`, stamps the version, and
+ad-hoc signs it; `make verify` checks the signature; `make install` puts it in `/Applications`
+and relaunches it; `make uninstall` takes it back out. No `xcodebuild`: SwiftPM plus the
+Makefile is the whole toolchain, which is the point of not needing the IDE.
+
+The marketing version is set by hand and the build number is the commit count, which rises on
+every commit and never repeats — macOS compares it when deciding whether a registered login
+item has changed. `/Applications` is not a preference: `SMAppService` keys the registration to
+the bundle's path, so an app that is run from `build/` loses "launch at login" on the next
+rebuild.
+
+The icon is drawn by the binary itself — `--appicon` writes 1024 px, `make icon` scales the set
+with `sips` and hands it to `iconutil`. Authoring it as an asset would let it drift from the
+ring in the menu bar; rendering it from the same code cannot. It is the ring at size on the
+panel's own surface, with no alias in the middle, because the letter identifies an account and
+the app icon identifies the app. A menu bar app's icon is seen in the login-items list, in a
+notification and in Finder, and in all three it only has to say which app this is.
+
+Sparkle is still deliberately left out until there is a second user.
 
 ## Token ownership
 

@@ -22,6 +22,10 @@ if !arguments.isEmpty {
             await Probe.login(CommandLine.arguments[index + 1])
         }
         if arguments.contains("--list") { await Probe.list() }
+        if let index = CommandLine.arguments.firstIndex(of: "--appicon"),
+           index + 1 < CommandLine.arguments.count {
+            await Probe.renderAppIcon(path: CommandLine.arguments[index + 1])
+        }
         if let index = CommandLine.arguments.firstIndex(of: "--icon"),
            index + 4 < CommandLine.arguments.count {
             let a = CommandLine.arguments
