@@ -17,6 +17,16 @@ if !arguments.isEmpty {
         }
         if arguments.contains("--poll") { await Probe.pollOnce() }
         if arguments.contains("--list") { await Probe.list() }
+        if let index = CommandLine.arguments.firstIndex(of: "--icon"),
+           index + 4 < CommandLine.arguments.count {
+            let a = CommandLine.arguments
+            await Probe.renderIcon(
+                path: a[index + 1],
+                alias: a[index + 2],
+                percent: a[index + 3],
+                elapsed: a[index + 4]
+            )
+        }
         exit(0)
     }
     dispatchMain()

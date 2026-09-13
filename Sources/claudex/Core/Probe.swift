@@ -160,3 +160,47 @@ enum Probe {
         }
     }
 }
+
+import AppKit
+
+extension Probe {
+    /// Writes the menu-bar image to a PNG at 2x so its geometry can be measured against a
+    /// screenshot of the app it is modelled on. Each argument takes a comma-separated list, one
+    /// element per ring, so the grouped layout can be checked too. Diagnostics only; nothing in
+    /// the app calls it.
+    @MainActor
+    static func renderIcon(path: String, alias: String, percent: String, elapsed: String) {
+        let aliases = alias.split(separator: ",").map(String.init)
+        let percents = percent.split(separator: ",").map { Double($0) }
+        let elapseds = elapsed.split(separator: ",").map { Double($0) ?? 0 }
+
+        let entries = aliases.enumerated().map { index, alias -> MenuBarIcon.Entry in
+            let spent = index < elapseds.count ? elapseds[index] : 0
+            let window = UsageWindow(
+                percent: index < percents.count ? percents[index] : nil,
+                resetsAt: Date().addingTimeInterval(5 * 3600 * (1 - spent)),
+                windowSeconds: 5 * 3600
+            )
+            return MenuBarIcon.Entry(alias: alias, fiveHour: window)
+        }
+        let image = MenuBarIcon.rings(entries)
+
+        let pixelWidth = Int(image.size.width.rounded()) * 2
+        let pixelHeight = Int(image.size.height.rounded()) * 2
+        guard let rep = NSBitmapImageRep(
+            bitmapDataPlanes: nil, pixelsWide: pixelWidth, pixelsHigh: pixelHeight,
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return }
+        rep.size = image.size
+
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
+        image.draw(in: NSRect(origin: .zero, size: image.size))
+        NSGraphicsContext.restoreGraphicsState()
+
+        guard let data = rep.representation(using: .png, properties: [:]) else { return }
+        try? data.write(to: URL(fileURLWithPath: path))
+        print("wrote \(path) at \(pixelWidth)x\(pixelHeight)")
+    }
+}

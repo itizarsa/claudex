@@ -5,6 +5,7 @@ struct UsagePopover: View {
     let engine: UsageEngine
     @State private var notice: String?
     @State private var busyProvider: ProviderKind?
+    @State private var switchingAccount: UUID?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -26,7 +27,7 @@ struct UsagePopover: View {
         .padding(.bottom, 8)
         .frame(width: Theme.popoverWidth)
         .background(Theme.popoverTint)
-        .background(.ultraThinMaterial)
+        .background(VisualEffectBackground())
     }
 
     // MARK: - Sections
@@ -51,7 +52,7 @@ struct UsagePopover: View {
             if accounts.isEmpty {
                 EmptyProviderCard(kind: kind, busy: busyProvider == kind) { importCurrent(kind) }
             } else {
-                VStack(spacing: 7) {
+                VStack(spacing: 6) {
                     ForEach(accounts) { account in
                         AccountCard(
                             account: account,
@@ -59,9 +60,15 @@ struct UsagePopover: View {
                             isActive: store.isActive(account),
                             showsActiveTag: accounts.count > 1,
                             isRefreshing: engine.isPolling(account.id),
-                            onAliasChange: { store.setAlias($0, for: account) }
+                            isSwitching: switchingAccount == account.id,
+                            canSwitch: accounts.count > 1 && switchingAccount == nil,
+                            onAliasChange: { store.setAlias($0, for: account) },
+                            onActivate: { activate(account) }
                         )
                         .contextMenu {
+                            if !store.isActive(account) {
+                                Button("Sign the CLI into \(account.label)") { activate(account) }
+                            }
                             Button("Remove \(account.label)", role: .destructive) { store.remove(account) }
                         }
                     }
@@ -85,6 +92,24 @@ struct UsagePopover: View {
     }
 
     // MARK: - Actions
+
+    /// Signing the CLI into another account rotates tokens on both sides of the swap, so the
+    /// snapshot for every account of that provider is stale the moment it succeeds. Refreshing
+    /// the provider rather than the one card is what keeps the panel honest.
+    private func activate(_ account: Account) {
+        guard !store.isActive(account), switchingAccount == nil else { return }
+        switchingAccount = account.id
+        notice = nil
+        Task {
+            defer { switchingAccount = nil }
+            do {
+                try await Switcher.activate(account, in: store)
+                engine.refreshAll()
+            } catch {
+                notice = ErrorPresenter.message(error)
+            }
+        }
+    }
 
     private func importCurrent(_ kind: ProviderKind) {
         busyProvider = kind
@@ -114,7 +139,12 @@ struct AccountCard: View {
     let isActive: Bool
     let showsActiveTag: Bool
     let isRefreshing: Bool
+    let isSwitching: Bool
+    /// False for the only account of a provider, where there is nothing to switch to, and while
+    /// another switch is already running.
+    let canSwitch: Bool
     let onAliasChange: (String) -> Void
+    let onActivate: () -> Void
     @State private var hovering = false
     @State private var editingAlias = false
     @State private var aliasDraft = ""
@@ -138,25 +168,35 @@ struct AccountCard: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .padding(Theme.cardPadding)
+        .padding(.horizontal, Theme.cardPaddingH)
+        .padding(.vertical, Theme.cardPaddingV)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+        // The card is the target: a row that already says which account it is, is a better
+        // place to click than a button repeating the name. Only an inactive one is clickable,
+        // so the active card does not invite a switch to where the CLI already is.
+        .onTapGesture { if isSwitchable { onActivate() } }
+        .help(isSwitchable ? "Sign the \(account.provider.displayName) CLI into \(account.label)" : "")
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .fill(hovering ? Theme.cardHover : Theme.card)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .strokeBorder(Theme.cardStroke, lineWidth: 1)
+                .strokeBorder(Theme.cardStroke, lineWidth: Theme.cardStrokeWidth)
         )
-        // Inactive accounts stay legible: they lose emphasis, not readability. A poll in flight
-        // dims the card it is updating, which is cheaper to look at than a teardown.
-        .opacity((isActive ? 1 : 0.78) * (isRefreshing ? 0.62 : 1))
+        // Every account is drawn at full strength: the Active tag says which one is live, and
+        // dimming the others made a two-account panel look half broken. A poll in flight dims
+        // the card it is updating, which is cheaper to look at than a teardown.
+        .opacity(isRefreshing || isSwitching ? 0.62 : 1)
         .onHover { hovering = $0 }
         .animation(Theme.transition, value: hovering)
         .animation(Theme.transition, value: isRefreshing)
+        .animation(Theme.transition, value: isSwitching)
         .animation(Theme.transition, value: state)
     }
+
+    private var isSwitchable: Bool { canSwitch && !isActive && !isSwitching }
 
     private var header: some View {
         HStack(spacing: 8) {
@@ -170,8 +210,14 @@ struct AccountCard: View {
                 .foregroundStyle(Theme.tertiaryText)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            if showsActiveTag && isActive {
+            // One slot, three readings: where the account is live, that it is being made live,
+            // or — under the pointer — that it can be.
+            if isSwitching {
+                Tag(text: "Switching…")
+            } else if showsActiveTag && isActive {
                 Tag(text: "Active")
+            } else if isSwitchable && hovering {
+                Tag(text: "Switch")
             }
         }
     }
@@ -182,19 +228,13 @@ struct AccountCard: View {
         if editingAlias {
             TextField("", text: $aliasDraft)
                 .textFieldStyle(.plain)
-                .font(.system(size: 10, weight: .semibold, design: .rounded))
+                .font(Theme.alias)
                 .multilineTextAlignment(.center)
-                .foregroundStyle(Theme.primaryText)
+                .foregroundStyle(Theme.accent)
                 .focused($aliasFocused)
-                .frame(width: 22, height: 22)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .fill(Color.white.opacity(0.14))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .strokeBorder(Color.white.opacity(0.32), lineWidth: 1)
-                )
+                .frame(width: Theme.aliasBadgeSize, height: Theme.aliasBadgeSize)
+                .background(Circle().fill(Theme.accent.opacity(0.15)))
+                .overlay(Circle().strokeBorder(Theme.accent.opacity(0.5), lineWidth: 1))
                 .onChange(of: aliasDraft) { _, new in
                     if new.count > 2 { aliasDraft = String(new.prefix(2)) }
                 }
@@ -228,16 +268,11 @@ struct AliasBadge: View {
 
     var body: some View {
         Text(text)
-            .font(.system(size: 10, weight: .semibold, design: .rounded))
-            .foregroundStyle(filled ? Theme.primaryText : Theme.secondaryText)
-            .frame(width: 22, height: 22)
+            .font(Theme.alias)
+            .foregroundStyle(filled ? Theme.accent : Theme.secondaryText)
+            .frame(width: Theme.aliasBadgeSize, height: Theme.aliasBadgeSize)
             .background(
-                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                    .fill(Color.white.opacity(filled ? 0.14 : 0))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                    .strokeBorder(Theme.hairline, lineWidth: filled ? 0 : 1)
+                Circle().fill(filled ? Theme.accent.opacity(0.15) : Color.primary.opacity(0.06))
             )
     }
 }
@@ -247,14 +282,11 @@ struct Tag: View {
 
     var body: some View {
         Text(text)
-            .font(Theme.pill)
-            .foregroundStyle(Theme.secondaryText)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2.5)
-            .background(
-                RoundedRectangle(cornerRadius: 5, style: .continuous)
-                    .fill(Color.white.opacity(0.08))
-            )
+            .font(Theme.activeTag)
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Theme.accent.opacity(0.12)))
     }
 }
 
@@ -269,11 +301,18 @@ struct WindowRow: View {
             HStack(alignment: .firstTextBaseline) {
                 Text(label)
                     .font(Theme.windowLabel)
-                    .foregroundStyle(emphasis ? Theme.primaryText : Theme.secondaryText)
+                    .foregroundStyle(Theme.primaryText)
+                if !emphasis {
+                    Text("Weekly")
+                        .font(Theme.pill)
+                        .foregroundStyle(Theme.secondaryText)
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(Color.primary.opacity(0.08)))
+                }
                 Spacer()
                 Text(window.percentText)
-                    .font(Theme.percent(emphasis ? 17 : 14))
-                    .tracking(-0.3)
+                    .font(Theme.percent(Theme.percentSize))
                     .foregroundStyle(window.severity.tone)
             }
 
@@ -282,7 +321,7 @@ struct WindowRow: View {
             if !window.resetText.isEmpty {
                 Text(window.resetText)
                     .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiaryText)
+                    .foregroundStyle(Theme.secondaryText)
             }
         }
     }
@@ -299,20 +338,26 @@ struct UsageBar: View {
             let width = geometry.size.width
 
             ZStack(alignment: .leading) {
-                RoundedRectangle(cornerRadius: Theme.barRadius, style: .continuous)
+                Capsule(style: .continuous)
                     .fill(Theme.track)
 
                 if window.percent != nil {
-                    RoundedRectangle(cornerRadius: Theme.barRadius, style: .continuous)
+                    Capsule(style: .continuous)
                         .fill(window.severity.tone)
                         .frame(width: max(window.fraction > 0 ? height : 0, width * window.fraction))
+                        .animation(.easeInOut(duration: 0.6), value: window.fraction)
                 }
 
                 if let elapsed = window.elapsed {
-                    Capsule()
-                        .fill(Color.white.opacity(0.85))
-                        .frame(width: 2, height: height + 4)
-                        .offset(x: min(width - 2, max(0, width * elapsed - 1)))
+                    // Proud of the bar on both sides, the same way the menu-bar notch crosses
+                    // the ring, so the two readings of elapsed time look like one idea. Tinted
+                    // by pace: position says how much time is gone, colour says whether the
+                    // spend rate will survive it.
+                    RoundedRectangle(cornerRadius: 1, style: .continuous)
+                        .fill(window.pace?.tone ?? Theme.primaryText)
+                        .frame(width: Theme.barMarkerWidth, height: height + 4)
+                        .offset(x: min(width - Theme.barMarkerWidth,
+                                       max(0, round(width * elapsed) - Theme.barMarkerWidth / 2)))
                 }
             }
         }
@@ -331,7 +376,7 @@ struct SkeletonRow: View {
             RoundedRectangle(cornerRadius: Theme.barRadius, style: .continuous)
                 .fill(Theme.track)
                 .frame(width: 54, height: 12)
-            RoundedRectangle(cornerRadius: Theme.barRadius, style: .continuous)
+            Capsule(style: .continuous)
                 .fill(Theme.track)
                 .frame(height: Theme.barHeight)
             RoundedRectangle(cornerRadius: Theme.barRadius, style: .continuous)
@@ -365,7 +410,8 @@ struct EmptyProviderCard: View {
             TextButton(title: busy ? "Adding…" : "Add current account", action: action)
                 .disabled(busy)
         }
-        .padding(Theme.cardPadding)
+        .padding(.horizontal, Theme.cardPaddingH)
+        .padding(.vertical, Theme.cardPaddingV)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
@@ -394,7 +440,7 @@ struct IconButton: View {
                 .frame(width: 22, height: 22)
                 .background(
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .fill(Color.white.opacity(hovering ? 0.1 : 0.045))
+                        .fill(Color.primary.opacity(hovering ? 0.1 : 0.045))
                 )
         }
         .buttonStyle(PressableButtonStyle())
@@ -418,7 +464,7 @@ struct TextButton: View {
                 .padding(.vertical, 4)
                 .background(
                     RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .fill(Color.white.opacity(hovering ? 0.08 : 0))
+                        .fill(Color.primary.opacity(hovering ? 0.08 : 0))
                 )
         }
         .buttonStyle(PressableButtonStyle())

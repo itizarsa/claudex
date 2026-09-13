@@ -5,6 +5,10 @@ import SwiftUI
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let store: AccountStore
     private let engine: UsageEngine
+    /// One status item carrying every provider's ring. Active is a per-provider fact — signing a
+    /// Claude account in does not change which Codex account is live — so each provider needs
+    /// its own ring; but one item per provider would be two click targets opening the same
+    /// panel and two things to drag into position, so the rings share an item.
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
 
@@ -16,16 +20,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        guard let button = statusItem.button else { return }
-
-        button.target = self
-        button.action = #selector(togglePopover)
-        button.sendAction(on: [.leftMouseUp])
-        button.toolTip = "Claudex usage"
-        // variableLength pads the button ~10 pt wider than the image, and the click highlight
-        // fills all of it, so a round ring ends up inside a wide pill. Matching the item to the
-        // icon's square makes the highlight read as a circle, like every other status item.
-        statusItem.length = NSStatusBar.system.thickness + 2
+        statusItem.button?.target = self
+        statusItem.button?.action = #selector(togglePopover)
+        statusItem.button?.sendAction(on: [.leftMouseUp])
 
         let controller = NSHostingController(rootView: UsagePopover(store: store, engine: engine))
         controller.sizingOptions = [.preferredContentSize]
@@ -71,17 +68,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
+    /// Redraws one ring per provider that has an account, each from that provider's own active
+    /// account, and resizes the item to suit. Before any account exists a single empty ring is
+    /// drawn, or the app would have nothing to click.
     private func updateStatusIcon() {
-        let account = store.activeAccount(for: store.settings.menuBarProvider)
-            ?? store.accounts.first { store.state($0.id).snapshot != nil }
-        let snapshot = account.flatMap { store.state($0.id).snapshot }
+        guard let button = statusItem.button else { return }
 
-        statusItem.button?.image = MenuBarIcon.ring(
-            alias: account?.badge ?? "-",
-            fiveHour: snapshot?.fiveHour ?? .unknown,
-            weekly: snapshot?.weekly ?? .unknown
-        )
-        statusItem.button?.imagePosition = .imageOnly
+        let populated = ProviderKind.allCases.filter { !store.accounts(for: $0).isEmpty }
+        let entries = populated.map { kind -> MenuBarIcon.Entry in
+            let account = store.activeAccount(for: kind) ?? store.accounts(for: kind).first
+            let snapshot = account.flatMap { store.state($0.id).snapshot }
+            return MenuBarIcon.Entry(
+                alias: account?.badge ?? "-",
+                fiveHour: snapshot?.fiveHour ?? .unknown
+            )
+        }
+
+        let drawn = entries.isEmpty ? [MenuBarIcon.Entry(alias: "-", fiveHour: .unknown)] : entries
+        statusItem.length = MenuBarIcon.width(forRings: drawn.count)
+        button.image = MenuBarIcon.rings(drawn)
+        button.imagePosition = .imageOnly
+        button.toolTip = populated.isEmpty
+            ? "Claudex usage"
+            : populated.map { kind in
+                let account = store.activeAccount(for: kind) ?? store.accounts(for: kind).first
+                return "\(kind.displayName): \(account?.label ?? "no account")"
+            }.joined(separator: "\n")
     }
 }
 

@@ -4,39 +4,60 @@ import AppKit
 /// because MenuBarExtra renders its label through the status item and does not lay out
 /// arbitrary vector views reliably.
 ///
-/// Three things are encoded, and no more: which account is live (the alias), how much of the
-/// five-hour window is spent (the arc), and how far the clock has travelled through it (the
-/// notch). Weekly usage tints the unspent track rather than claiming its own row, because the
-/// status bar gives us 22 pt of height and nothing else, and a separate rule spent 3 of them.
+/// Three things are encoded per ring, and no more: which account is live (the alias), how much
+/// of the five-hour window is spent (the arc), and how far the clock has travelled through it
+/// (the notch, tinted by pace). Ring geometry follows Claude Usage Tracker — 22 pt canvas,
+/// 9.5 pt centreline radius, 3 pt stroke, neutral track under a tinted arc. No weekly bar under
+/// the ring; weekly lives in the popover.
+///
+/// Every provider's ring is drawn into one image rather than one status item each. Separate
+/// items look the same but behave as separate controls: two click targets opening the panel,
+/// and two things to drag into place. One image keeps the set together.
 enum MenuBarIcon {
-    static func ring(alias: String, fiveHour: UsageWindow, weekly: UsageWindow) -> NSImage {
+    struct Entry {
+        var alias: String
+        var fiveHour: UsageWindow
+    }
+
+    /// Points between adjacent rings. The notch already spends the point either side of each
+    /// ring, so this is the gap over and above that.
+    private static let gap: CGFloat = 4
+
+    static func rings(_ entries: [Entry]) -> NSImage {
         // The status bar will not scale a fitting image, so drawing to its exact thickness is
         // the only way to get every available pixel. Clamped in case the value ever moves.
         let height = min(22, max(18, NSStatusBar.system.thickness))
-        // Flush to the canvas: the status bar will scale a taller image back down, so 22 pt is
-        // the hard ceiling on diameter and the only way to read larger is to fill all of it.
-        let side = height - 0.5
-        // Square, because the click highlight fills the status item: any spare width turns the
-        // highlight into a pill around a round ring. `AppDelegate` pins the item to match.
-        let size = NSSize(width: height, height: height)
+        // The ring is drawn to the full bar height, as the reference does: measured off a 2x
+        // capture, its ring is 44 px across on a 44 px bar, with a 6 px stroke.
+        let side = height
+        // Each ring gets its diameter plus a point either side, because the notch reaches a
+        // quarter point past the outer edge and a tight canvas would clip it flat.
+        let slot = side + 2
+        let count = max(1, entries.count)
+        let size = NSSize(width: slot * CGFloat(count) + gap * CGFloat(count - 1), height: height)
 
         let image = NSImage(size: size, flipped: false) { _ in
-            // Thin enough that the ring reads as a rule around the alias rather than a donut:
-            // every point of stroke is a point the glyph cannot use.
-            let lineWidth: CGFloat = 2
-            let ringBox = NSRect(
-                x: (size.width - side) / 2,
-                y: (height - side) / 2,
-                width: side,
-                height: side
-            )
-            let center = NSPoint(x: ringBox.midX, y: ringBox.midY)
-            let radius = ringBox.width / 2 - lineWidth / 2
+            // Heavy enough that the arc reads as a gauge at a glance rather than a hairline,
+            // which is the one thing the ring has to do from across a 22 pt strip.
+            let lineWidth: CGFloat = 3
+            // Centreline radius, so the stroke's outer edge lands on the canvas edge: 9.5 pt on
+            // a 22 pt bar, matching the reference's 44 px outer diameter at 2x.
+            let radius = side / 2 - lineWidth / 2
 
-            drawTrack(weekly, center: center, radius: radius, lineWidth: lineWidth)
-            drawUsageArc(fiveHour, center: center, radius: radius, lineWidth: lineWidth)
-            drawTimeNotch(fiveHour, center: center, radius: radius, lineWidth: lineWidth)
-            drawAlias(alias, in: ringBox, lineWidth: lineWidth)
+            for (index, entry) in entries.enumerated() {
+                let ringBox = NSRect(
+                    x: (slot + gap) * CGFloat(index) + (slot - side) / 2,
+                    y: 0,
+                    width: side,
+                    height: side
+                )
+                let center = NSPoint(x: ringBox.midX, y: ringBox.midY)
+
+                drawTrack(center: center, radius: radius, lineWidth: lineWidth)
+                drawUsageArc(entry.fiveHour, center: center, radius: radius, lineWidth: lineWidth)
+                drawTimeNotch(entry.fiveHour, center: center, radius: radius, lineWidth: lineWidth)
+                drawAlias(entry.alias, in: ringBox, radius: radius, lineWidth: lineWidth)
+            }
 
             return true
         }
@@ -44,18 +65,27 @@ enum MenuBarIcon {
         return image
     }
 
-    /// The track is the unspent part of the session window, tinted by weekly severity. Weekly
-    /// only ever needs to answer "is the week also running out", and a hue answers that without
-    /// taking space from the arc.
-    private static func drawTrack(_ weekly: UsageWindow, center: NSPoint, radius: CGFloat, lineWidth: CGFloat) {
-        let tint: NSColor = weekly.percent == nil
-            ? NSColor.white.withAlphaComponent(0.16)
-            : Severity(percent: weekly.percent).toneNS.withAlphaComponent(0.3)
+    /// Width the status item must be pinned to for `count` rings. `variableLength` pads the
+    /// button wider than its image and the click highlight fills all of it, so a pill would
+    /// otherwise appear around the rings.
+    static func width(forRings count: Int) -> CGFloat {
+        let side = min(22, max(18, NSStatusBar.system.thickness))
+        let slot = side + 2
+        return slot * CGFloat(max(1, count)) + gap * CGFloat(max(0, count - 1))
+    }
 
+    /// The full circle, always drawn, neutral. It is what makes a 20% arc read as "20% of a
+    /// ring" instead of a stray stroke, and it keeps the icon the same shape at every level.
+    private static func drawTrack(center: NSPoint, radius: CGFloat, lineWidth: CGFloat) {
         let track = NSBezierPath()
         track.appendArc(withCenter: center, radius: radius, startAngle: 0, endAngle: 360)
         track.lineWidth = lineWidth
-        tint.setStroke()
+        track.lineCapStyle = .round
+        // Solid enough to read as a track on the menu bar's own translucency. At 0.15 the
+        // unfilled part of the ring disappeared and a partial arc looked like a stray stroke;
+        // at 0.28 it competed with the arc. The reference could not settle this — every capture
+        // of it is at 100%, where no track shows — so this is the one value here not measured.
+        NSColor.white.withAlphaComponent(0.2).setStroke()
         track.stroke()
     }
 
@@ -80,44 +110,59 @@ enum MenuBarIcon {
     private static func drawTimeNotch(_ window: UsageWindow, center: NSPoint, radius: CGFloat, lineWidth: CGFloat) {
         guard let elapsed = window.elapsed else { return }
         let angle = (90 - 360 * elapsed) * .pi / 180
-        // Fixed length rather than derived from the stroke, so a thin ring does not shrink the
-        // notch to a dot. It can only grow inward: the ring is already flush to the canvas, so
-        // anything past its outer edge is clipped away. `drawAlias` keeps the glyph clear of it.
-        let inner = radius - lineWidth / 2 - 1.75
-        let outer = radius + lineWidth / 2
+        // Symmetric about the ring and proud of it on both sides. Crossing the stroke rather
+        // than sitting inside it is what lets the notch be read against a full arc. The
+        // reference's is 11 px long and 5 px thick at 2x, straddling its stroke; these are the
+        // same figures in points.
+        let inner = radius - 2.75
+        let outer = radius + 2.75
 
         let notch = NSBezierPath()
         notch.move(to: NSPoint(x: center.x + cos(angle) * inner, y: center.y + sin(angle) * inner))
         notch.line(to: NSPoint(x: center.x + cos(angle) * outer, y: center.y + sin(angle) * outer))
-        notch.lineWidth = 1.5
+        notch.lineWidth = 2.5
+        // Butt, not round: round caps add half the stroke width at each end, which overshot the
+        // reference's 11 px tick by three pixels and pushed it into the canvas edge.
         notch.lineCapStyle = .butt
-        NSColor.white.withAlphaComponent(0.92).setStroke()
+        (Pace(percent: window.percent, elapsed: elapsed)?.toneNS ?? .white).setStroke()
         notch.stroke()
     }
 
-    /// Sized to the ring's clear interior rather than to a fixed point size, because glyph width
-    /// varies more than character count suggests: "W" and "CX" overrun at the size that suits
-    /// "C". Shrink-to-fit keeps every alias as large as its own shape allows.
-    private static func drawAlias(_ alias: String, in box: NSRect, lineWidth: CGFloat) {
+    /// The reference sets a small letter into the ring rather than filling it: 12 px cap height
+    /// at 2x inside a 32 px clear interior. Filling the interior instead — which is what an
+    /// unbounded fit does — crowds the arc and is the single thing that made our ring read as
+    /// heavier than the app it copies.
+    ///
+    /// So the size is fixed, and the fit loop only takes over for a two-character alias that
+    /// would not otherwise clear the ring. The limit is the glyph's diagonal against the inner
+    /// clear diameter, because the interior is a circle rather than a box. Measured on cap
+    /// height rather than the line box, which is mostly ascender and descender space that no
+    /// uppercase alias occupies.
+    private static func drawAlias(_ alias: String, in box: NSRect, radius: CGFloat, lineWidth: CGFloat) {
         let text = alias.isEmpty ? "?" : alias
-        let available = box.width - 2 * lineWidth - 5
-        var size: CGFloat = 14
-        var attributes: [NSAttributedString.Key: Any] = [:]
-        var measured = NSSize.zero
+        // The inner clear diameter, less a couple of points of breathing room: a two-character
+        // alias measured flush against the stroke technically fits, but reads as jammed into it.
+        let clear = 2 * (radius - lineWidth / 2) - 3
+
+        var size: CGFloat = 11
+        var font = NSFont.systemFont(ofSize: size, weight: .regular)
+        var width: CGFloat = 0
         while true {
-            attributes = [
-                .font: NSFont.systemFont(ofSize: size, weight: .semibold),
-                .foregroundColor: NSColor.white.withAlphaComponent(0.92),
-            ]
-            measured = (text as NSString).size(withAttributes: attributes)
-            if measured.width <= available || size <= 7 { break }
+            font = NSFont.systemFont(ofSize: size, weight: .regular)
+            width = (text as NSString).size(withAttributes: [.font: font]).width
+            if hypot(width, font.capHeight) <= clear || size <= 7 { break }
             size -= 0.5
         }
-        // Optical centring: glyphs sit slightly high inside their line box, so nudge down.
+
+        // Centre the cap band, not the line box: `draw(at:)` places the line box's bottom-left,
+        // so back out the descender to put the baseline where cap height straddles the middle.
         let origin = NSPoint(
-            x: box.midX - measured.width / 2,
-            y: box.midY - measured.height / 2 + 0.5
+            x: box.midX - width / 2,
+            y: box.midY - font.capHeight / 2 + font.descender
         )
-        (text as NSString).draw(at: origin, withAttributes: attributes)
+        (text as NSString).draw(at: origin, withAttributes: [
+            .font: font,
+            .foregroundColor: NSColor.white,
+        ])
     }
 }

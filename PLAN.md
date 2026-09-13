@@ -240,6 +240,80 @@ Popover, grouped by provider, ordered by the user's arrangement:
 
 Row actions: make active, rename, disable, remove. Footer: add account, settings, quit.
 
+## Visual parity with Claude Usage Tracker
+
+Claude Usage Tracker is the reference look for both the menu-bar ring and the popover. The
+figures below were measured off 2x screenshots of it, pixel by pixel, not copied from its source:
+the ring from a menu-bar capture where its item sits beside ours, the palette and bar from a
+capture of its popover. Point values are the pixel measurements halved.
+
+### Menu-bar ring
+
+Matched to the reference, with one deliberate exception: **no weekly underline bar.** The
+reference draws a 22 pt green rule under the ring for the weekly window; claudex keeps weekly in
+the popover only.
+
+Reference, measured: 44 px outer diameter, 6 px stroke, no interior fill (its background is
+within two RGB units of the bar behind it), 12 px cap height and 3 px stem on the alias, and an
+11 x 5 px elapsed tick straddling the stroke and overhanging its outer edge by two pixels.
+
+Which gives, in points:
+
+- Canvas 22 pt tall and 24 pt wide. The extra width is where the tick's overhang goes; a square
+  canvas clipped it flat against the edge. `AppDelegate` pins the status item to match.
+- Ring: 3 pt stroke on a 9.5 pt centreline radius, so the outer edge lands on the canvas edge.
+- Alias: fixed 11 pt regular. The reference's own alias is 8 pt semibold — a 12 px cap — but
+  without its darker inner disc the letter floated in an empty ring at that size, so ours is set
+  larger: a 17 px cap at the same 3 px stem, which is why the weight drops as the size rises.
+  It is fixed rather than fitted because filling the interior is what made our earlier ring read
+  as heavier than the reference's; the fit loop only shrinks a two-character alias that would
+  not otherwise clear the ring, with two points of margin so it does not sit against the stroke.
+- Tick: 2.5 pt wide, butt caps, spanning the centreline radius ± 2.75 pt.
+
+Unverified: the track colour under the arc. Every capture of the reference is at 100%, where no
+track is visible. White at 0.2 alpha is a judgement call, not a measurement.
+
+### One ring per provider, one status item
+
+The status item was a single ring chosen by `settings.menuBarProvider`, which made "active"
+effectively global. It now draws one ring per provider that has an account, each from that
+provider's own active account. `AccountStore.active` was already keyed by `ProviderKind`; the
+menu bar was the only place that collapsed it. `settings.menuBarProvider` is gone.
+
+The rings share one status item rather than taking one each. Separate items look identical but
+behave as separate controls: two click targets opening the same panel, and two things to drag
+into position, which can be separated by another app's item. `MenuBarIcon.rings` lays them out
+at a 4 pt gap and `MenuBarIcon.width(forRings:)` gives the length the item is pinned to, since
+`variableLength` pads the button and the click highlight fills whatever it is given.
+
+### Palette
+
+Sampled from the reference's pixels rather than taken from the system palette, which is darker
+and more saturated and was most of why the same layout read as harsher here:
+
+- Red (critical): `#FF6058`
+- Green (safe): `#45CD72`
+- Bar track: `#383636` over a `#212020` card. Ours sits on vibrancy rather than a flat fill, so
+  it is expressed as white at 0.13 alpha, which lands on that grey over that background.
+
+Amber is unmeasured — the reference was not captured in that band — and stays `systemOrange`.
+
+### Popover
+
+- The "5-hour rolling window" subtitle is gone. The row label and the reset line carry it.
+- Bars are capsules, 4 pt tall, with the elapsed marker 3 pt wide standing 2 pt proud at each
+  end. All three are the reference's measurements.
+- Inactive accounts are no longer dimmed. The Active tag is the only signal of which account is
+  live. The in-flight poll dim stays.
+
+### Measuring against the reference again
+
+`claudex --icon <path> <alias> <percent> <elapsed>` writes the menu-bar image to a PNG at 2x,
+which is what makes a pixel comparison against a screenshot possible. Each of the three values
+takes a comma-separated list, one element per ring — `--icon out.png A,PE 96,42 0.8,0.35` — so
+the grouped layout can be checked as well as a single ring. Diagnostics only; nothing in the app
+calls `Probe.renderIcon`.
+
 ## Adding accounts
 
 Two paths, both needed.
@@ -275,8 +349,11 @@ Verified end to end against live accounts: both CLIs imported, both usage endpoi
 the menu bar app polling on its timer and writing snapshots. The one write outside the
 container that Phase 1 does perform is the refresh mirror described below.
 
-Phase 2 — switching. `Switcher.activate` drives it and `--switch <label>` exercises it
-headlessly; what remains is wiring the same call to a manual switch in the popover. The order
+Phase 2 — switching. **Done.** `Switcher.activate` drives it, `--switch <label>` exercises it
+headlessly, and the popover now calls it: an inactive card is itself the control, offering
+"Switch" under the pointer, showing "Switching…" while the call runs, and reporting a failure
+in the panel's notice line. A success refreshes every account of that provider, because the
+swap rotates tokens on both sides and leaves both snapshots stale. The order
 inside `Switcher` carries the correctness, because refresh tokens rotate and the last write
 wins: harvest the outgoing account's live CLI tokens into its vault entry, persist the incoming
 account's refreshed tokens before handing them over, then record the change. Skipping the
