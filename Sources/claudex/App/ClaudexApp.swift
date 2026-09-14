@@ -9,8 +9,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     /// Claude account in does not change which Codex account is live — so each provider needs
     /// its own ring; but one item per provider would be two click targets opening the same
     /// panel and two things to drag into position, so the rings share an item.
+    private let routing: RoutingController
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
+    private var terminationPending = false
 
     override init() {
         let providers = ProviderRegistry.live()
@@ -27,7 +29,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             notifier: notifier,
             rotator: rotator
         )
-        self.state = PanelState(store: store, engine: engine, switcher: switcher, login: login)
+        // The proxy is constructed but not started. Starting it and editing a CLI config are
+        // the same user action, taken in Settings; launching the app is not consent to either.
+        let routing = RoutingController(
+            proxy: LoopbackAccountProxy(routing: StoreAccountRouting(store: store, providers: providers)),
+            installer: NativeCLIRoutingInstaller.live()
+        )
+        self.routing = routing
+        self.state = PanelState(store: store, engine: engine, switcher: switcher, login: login, routing: routing)
         super.init()
     }
 
@@ -48,6 +57,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         observeStatusIcon()
         state.engine.start()
+
+        // The listener binds an ephemeral port, so a CLI routed in an earlier run points at a
+        // port nobody holds. Repairing that is finishing the user's decision; a CLI claudex was
+        // never asked to route stays untouched.
+        Task { await routing.repairOnLaunch() }
+    }
+
+    /// Drain in-flight responses before the process goes. Asking AppKit to wait keeps the main
+    /// actor free to run `RoutingController.shutdown`; blocking it with a semaphore would
+    /// deadlock the task that has to signal that semaphore.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !terminationPending else { return .terminateLater }
+        terminationPending = true
+        Task {
+            await routing.shutdown()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 
     @objc private func togglePopover() {
@@ -65,6 +92,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
+            // Both config files are the user's to edit; re-reading on open is how the panel
+            // notices they did.
+            state.refreshRouting()
             // The item stays lit for as long as the panel is open, which is what tells you
             // which icon the panel belongs to.
             button.highlight(true)

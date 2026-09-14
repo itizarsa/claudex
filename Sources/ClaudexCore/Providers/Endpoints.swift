@@ -4,6 +4,9 @@ import Foundation
 /// change underneath the app, so they are kept in one place rather than inlined at call sites.
 enum Endpoints {
     enum Claude {
+        /// Where routed inference traffic goes. Subscription requests use the same host the
+        /// CLI would have called directly, so the proxy changes the credential and nothing else.
+        static let inference = URL(string: "https://api.anthropic.com")!
         static let usage = URL(string: "https://api.anthropic.com/api/oauth/usage")!
         static let profile = URL(string: "https://api.anthropic.com/api/oauth/profile")!
         /// Primary token endpoint, with the older console host as a fallback.
@@ -22,6 +25,9 @@ enum Endpoints {
     }
 
     enum Codex {
+        /// The ChatGPT-backed Codex endpoint, not the public OpenAI API: a subscription token
+        /// is only accepted here.
+        static let inference = URL(string: "https://chatgpt.com/backend-api/codex")!
         static let usage = URL(string: "https://chatgpt.com/backend-api/wham/usage")!
         static let token = URL(string: "https://auth.openai.com/oauth/token")!
         static let authorize = URL(string: "https://auth.openai.com/oauth/authorize")!

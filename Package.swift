@@ -7,9 +7,16 @@ import PackageDescription
 let package = Package(
     name: "claudex",
     platforms: [.macOS(.v14)],
+    dependencies: [
+        // The proxy needs an HTTP server whose request and response bodies are async
+        // sequences of buffers, so a model response is forwarded rather than collected.
+        // Hummingbird is the smallest such server; URLSession stays the upstream client.
+        .package(url: "https://github.com/hummingbird-project/hummingbird.git", from: "2.0.0"),
+    ],
     targets: [
         .target(
             name: "ClaudexCore",
+            dependencies: [.product(name: "Hummingbird", package: "hummingbird")],
             path: "Sources/ClaudexCore",
             swiftSettings: [.swiftLanguageMode(.v5)]
         ),

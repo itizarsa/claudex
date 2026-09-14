@@ -10,6 +10,9 @@ enum Paths {
     static var accountsFile: URL { support.appending(path: "accounts.json") }
     static var settingsFile: URL { support.appending(path: "settings.json") }
     static var snapshotCache: URL { support.appending(path: "snapshots.json") }
+    /// What each CLI config looked like before claudex edited it, so uninstall restores rather
+    /// than guesses.
+    static var routingFile: URL { support.appending(path: "routing.json") }
     static var vaultFile: URL { support.appending(path: "vault.json") }
 
     // CLI state we read, and (for the active account only) mirror refreshed tokens back to.
@@ -17,6 +20,9 @@ enum Paths {
     static var claudeConfig: URL { home.appending(path: ".claude.json") }
     static var claudeProjects: URL { home.appending(path: ".claude/projects", directoryHint: .isDirectory) }
     static var codexAuth: URL { home.appending(path: ".codex/auth.json") }
+    /// CLI configuration claudex edits only on an explicit user action, never on launch.
+    static var claudeSettings: URL { home.appending(path: ".claude/settings.json") }
+    static var codexConfig: URL { home.appending(path: ".codex/config.toml") }
     static var codexSessions: URL { home.appending(path: ".codex/sessions", directoryHint: .isDirectory) }
 
     static func ensureSupportDirectory() throws {

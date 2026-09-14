@@ -38,10 +38,26 @@ struct SettingsPanel: View {
                 }
             }
 
+            group("CLI routing") {
+                SettingRow(
+                    title: "Route CLIs through Claudex",
+                    caption: routingCaption
+                ) { EmptyView() }
+
+                ForEach(ProviderKind.allCases, id: \.self) { kind in
+                    RoutingRow(
+                        kind: kind,
+                        state: state.routing.state(for: kind),
+                        busy: state.routing.busy == kind,
+                        onChange: { state.setRouting(kind, enabled: $0) }
+                    )
+                }
+            }
+
             group("Notifications") {
                 SettingRow(
                     title: "Notify on switch",
-                    caption: "A switch applies to the next session you start, never to one already running, so the notice is the only signal it happened."
+                    caption: "Routed CLIs switch on their next request; unrouted CLIs switch in the next session. The notification confirms it happened."
                 ) {
                     Toggle("", isOn: setting(\.notificationsEnabled))
                         .labelsHidden()
@@ -78,6 +94,16 @@ struct SettingsPanel: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
+    }
+
+    /// Says the two things a user cannot discover from the switch: that this writes to files
+    /// they own, and that the routing only holds while claudex is running.
+    private var routingCaption: String {
+        """
+        Writes ~/.claude/settings.json and ~/.codex/config.toml so a running session picks up \
+        an account switch on its next request. Requests fail while Claudex is not running. \
+        Turning a provider off restores its file.
+        """
     }
 
     private var header: some View {
@@ -143,6 +169,48 @@ struct SettingsPanel: View {
             // than leaving a toggle claiming something that did not happen.
             notice = "Could not \(enabled ? "enable" : "disable") launch at login: \(error.localizedDescription)"
             launchAtLogin = LaunchAtLogin.isEnabled
+        }
+    }
+}
+
+/// One provider's routing switch, with the file state underneath it.
+///
+/// The switch is the only control, but it cannot always be flipped: a config someone else set
+/// is reported rather than replaced, because claudex overwriting an organisation's gateway
+/// would be a silent change to how their work reaches a vendor.
+struct RoutingRow: View {
+    let kind: ProviderKind
+    let state: RoutingController.State
+    let busy: Bool
+    let onChange: (Bool) -> Void
+
+    var body: some View {
+        SettingRow(title: kind.displayName, caption: caption) {
+            if busy {
+                ProgressView().controlSize(.mini)
+            } else {
+                Toggle("", isOn: Binding(get: { state == .on }, set: onChange))
+                    .labelsHidden()
+                    .toggleStyle(.switch)
+                    .controlSize(.mini)
+                    .disabled(isBlocked)
+            }
+        }
+        .opacity(isBlocked ? 0.6 : 1)
+    }
+
+    private var isBlocked: Bool {
+        if case .blocked = state { return true }
+        return false
+    }
+
+    private var caption: String? {
+        switch state {
+        case .off: return nil
+        case .on: return "Routed. Sessions already running switch accounts on their next request."
+        case .needsRepair: return "Configured for a Claudex that is no longer listening. Turn routing on to repair."
+        case .blocked(let reason): return "\(reason). Claudex will not change it."
+        case .failed(let message): return message
         }
     }
 }

@@ -17,6 +17,7 @@ final class PanelState {
     let engine: UsageEngine
     private let switcher: any AccountSwitching
     private let login: any AccountSigningIn
+    let routing: RoutingController
 
     var notice: String?
     var switchingAccount: UUID?
@@ -27,12 +28,14 @@ final class PanelState {
         store: AccountStore,
         engine: UsageEngine,
         switcher: any AccountSwitching,
-        login: any AccountSigningIn
+        login: any AccountSigningIn,
+        routing: RoutingController
     ) {
         self.store = store
         self.engine = engine
         self.switcher = switcher
         self.login = login
+        self.routing = routing
     }
 
     var settings: ClaudexCore.Settings { store.settings }
@@ -129,6 +132,22 @@ final class PanelState {
                 Log.write("panel: sign-in failed — \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
                 notice = ErrorPresenter.message(error)
             }
+        }
+    }
+
+    /// Routing is the one setting that edits files outside claudex, so the panel reads the
+    /// files again whenever it is opened rather than trusting what it last wrote.
+    func refreshRouting() { routing.refresh() }
+
+    func setRouting(_ kind: ProviderKind, enabled: Bool) {
+        notice = nil
+        Task {
+            if enabled {
+                await routing.enable(kind)
+            } else {
+                await routing.disable(kind)
+            }
+            if case .failed(let message) = routing.state(for: kind) { notice = message }
         }
     }
 

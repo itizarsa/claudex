@@ -41,7 +41,18 @@ extension Probe {
             notifier: notifier,
             rotator: rotator
         )
-        let state = PanelState(store: store, engine: engine, switcher: switcher, login: login)
+        // Screenshot rendering must not reach the real CLI config files, so the installer is
+        // pointed at a throwaway directory that nothing ever reads back.
+        let scratch = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "claudex-probe-\(UUID().uuidString)")
+        let routing = RoutingController(
+            proxy: LoopbackAccountProxy(routing: StaticAccountRouting([:])),
+            installer: NativeCLIRoutingInstaller(
+                claudeSettings: scratch.appending(path: "settings.json"),
+                codexConfig: scratch.appending(path: "config.toml"),
+                backups: scratch.appending(path: "routing.json")
+            )
+        )
+        let state = PanelState(store: store, engine: engine, switcher: switcher, login: login, routing: routing)
         // AppKit needs its application object before a view can be laid out, and the panel is
         // laid out here on the real main thread rather than on the main queue: under
         // `dispatchMain()` the two are not the same thread.
