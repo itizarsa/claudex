@@ -74,11 +74,11 @@ struct UsagePopover: View {
                             isSwitching: state.switchingAccount == account.id,
                             canSwitch: accounts.count > 1 && state.switchingAccount == nil,
                             onAliasChange: { state.setAlias($0, for: account) },
-                            onActivate: { state.activate(account) }
+                            onActivate: { state.select(account) }
                         )
                         .contextMenu {
                             if !state.isActive(account) {
-                                Button("Sign the CLI into \(account.label)") { state.activate(account) }
+                                Button("Route the CLI through \(account.label)") { state.select(account) }
                             }
                             Button("Remove \(account.label)", role: .destructive) { state.remove(account) }
                         }

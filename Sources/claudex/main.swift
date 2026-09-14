@@ -19,20 +19,15 @@ if !arguments.isEmpty {
         let credentialStore = KeychainCredentialStore()
         let providers = ProviderRegistry.live()
         let store = AccountStore(credentialStore: credentialStore)
-        let switcher = Switcher(store: store, providers: providers)
-        let login = SandboxedLogin(store: store, providers: providers, switcher: switcher)
+        let selector = AccountSelector(store: store)
+        let login = SandboxedLogin(store: store, providers: providers, selector: selector)
         let reader = UsageReader(store: store, providers: providers)
 
         if arguments.contains("--vault") { Probe.vaultSelfTest(store: credentialStore) }
         if arguments.contains("--probe") { await Probe.run(providers: providers) }
         if let index = CommandLine.arguments.firstIndex(of: "--switch"),
            index + 1 < CommandLine.arguments.count {
-            await Probe.switchTo(
-                CommandLine.arguments[index + 1],
-                store: store,
-                switcher: switcher,
-                providers: providers
-            )
+            await Probe.switchTo(CommandLine.arguments[index + 1], store: store, selector: selector)
         }
         if arguments.contains("--poll") { await Probe.pollOnce(store: store, reader: reader) }
         if arguments.contains("--rotate") { await Probe.rotationPlan(store: store, reader: reader) }

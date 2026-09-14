@@ -69,29 +69,23 @@ public enum Probe {
         store.cacheSnapshots()
     }
 
-    /// Headless switch, by label. The one path that writes to a CLI's own storage, so it reports
-    /// what the CLI reads back afterwards rather than only that the write returned.
+    /// Headless proxy-account selection by label.
     @MainActor
     public static func switchTo(
         _ label: String,
         store: AccountStore,
-        switcher: any AccountSwitching,
-        providers: ProviderRegistry
+        selector: any AccountSelecting
     ) async {
         guard let account = store.accounts.first(where: { $0.label == label }) else {
             print("no account labelled \(label)")
             return
         }
         do {
-            guard try await switcher.activate(account) else {
+            guard try await selector.select(account) else {
                 print("\(account.label) is already active")
                 return
             }
-            let provider = try providers.provider(for: account.provider)
-            let live = try provider.currentCLICredentials()
-            let matches = live?.refreshFingerprint == (try store.credentials(for: account))?.refreshFingerprint
-            print("switched \(account.provider.rawValue) to \(account.label)")
-            print("  CLI reads back: \(matches ? "same credentials" : "MISMATCH")")
+            print("selected \(account.provider.rawValue) account \(account.label) for proxy routing")
         } catch {
             print("switch failed: \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
         }

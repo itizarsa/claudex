@@ -25,16 +25,16 @@ public final class SandboxedLogin: AccountSigningIn {
 
     private let store: AccountStore
     private let providers: ProviderRegistry
-    private let switcher: any AccountSwitching
+    private let selector: any AccountSelecting
 
     public init(
         store: AccountStore,
         providers: ProviderRegistry,
-        switcher: any AccountSwitching
+        selector: any AccountSelecting
     ) {
         self.store = store
         self.providers = providers
-        self.switcher = switcher
+        self.selector = selector
     }
 
     /// Runs the login and stores whatever it produces as an inactive account. Inactive on
@@ -81,11 +81,10 @@ public final class SandboxedLogin: AccountSigningIn {
         let isFirst = store.accounts(for: kind).isEmpty
         let account = try store.add(identity: identity, kind: kind, label: label, credentials: credentials)
         // A later account is added inactive — adding is not a request to switch — but the first
-        // one has nothing to be switched away from, and signing in here is how the CLI is meant
-        // to get its credentials now, so it takes over straight away.
+        // one has nothing to be switched away from, so proxy routing selects it immediately.
         if isFirst {
-            _ = try await switcher.activate(account)
-            Log.write("login: \(account.label) is the first \(kind.rawValue) account, signed the CLI into it")
+            _ = try await selector.select(account)
+            Log.write("login: \(account.label) is the first \(kind.rawValue) account, selected for proxy routing")
         }
         Log.write("login: added \(account.label); store now has \(store.accounts(for: kind).count) \(kind.rawValue) account(s)")
         return LoginResult(account: account, wasAlreadyKnown: false)

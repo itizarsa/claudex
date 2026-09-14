@@ -15,7 +15,7 @@ final class PanelState {
 
     private let store: AccountStore
     let engine: UsageEngine
-    private let switcher: any AccountSwitching
+    private let selector: any AccountSelecting
     private let login: any AccountSigningIn
     let routing: RoutingController
 
@@ -27,13 +27,13 @@ final class PanelState {
     init(
         store: AccountStore,
         engine: UsageEngine,
-        switcher: any AccountSwitching,
+        selector: any AccountSelecting,
         login: any AccountSigningIn,
         routing: RoutingController
     ) {
         self.store = store
         self.engine = engine
-        self.switcher = switcher
+        self.selector = selector
         self.login = login
         self.routing = routing
     }
@@ -99,14 +99,14 @@ final class PanelState {
 
     func saveSettings() { store.settings.save() }
 
-    func activate(_ account: Account) {
+    func select(_ account: Account) {
         guard !store.isActive(account), switchingAccount == nil else { return }
         switchingAccount = account.id
         notice = nil
         Task {
             defer { switchingAccount = nil }
             do {
-                _ = try await switcher.activate(account)
+                _ = try await selector.select(account)
                 engine.rotator.noteManualSwitch(account.provider)
                 engine.refreshAll()
             } catch {
@@ -139,8 +139,18 @@ final class PanelState {
     /// files again whenever it is opened rather than trusting what it last wrote.
     func refreshRouting() { routing.refresh() }
 
+    func routingEnabled(_ kind: ProviderKind) -> Bool {
+        settings.routedProviders.contains(kind)
+    }
+
     func setRouting(_ kind: ProviderKind, enabled: Bool) {
         notice = nil
+        if enabled {
+            store.settings.routedProviders.insert(kind)
+        } else {
+            store.settings.routedProviders.remove(kind)
+        }
+        store.settings.save()
         Task {
             if enabled {
                 await routing.enable(kind)

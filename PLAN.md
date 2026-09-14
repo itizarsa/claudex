@@ -137,21 +137,22 @@ endpoints still return the shape this app expects.
           SandboxedLogin.swift    # spawn the CLI's own login into a throwaway config dir
           AccountLabel.swift      # name an account from its identity
 
-Provider protocol, one seam per CLI:
+Provider boundaries:
 
-    protocol Provider {
-        var kind: ProviderKind { get }                                  // .claude | .codex
-        func fetchUsage(_ creds: Credentials) async throws -> UsageSnapshot
-        func fetchIdentity(_ creds: Credentials) async throws -> Identity
-        func refresh(_ creds: Credentials) async throws -> Credentials
-        func activate(_ creds: Credentials, identity: Identity) throws  // write CLI state
-        func readCurrentCLICredentials() throws -> Credentials?         // the active account
+    protocol UsageAPI {
+        func usage(_ credential: Credential) async throws -> UsageSnapshot
+        func identity(_ credential: Credential) async throws -> Identity
+        func refreshed(_ credential: Credential) async throws -> Credential
     }
 
-`activate` is the only writer of CLI state. For Claude it writes
-`.credentials.json`, the Keychain item, and the `oauthAccount` block in `.claude.json`,
-in that order, each as atomic replace. For Codex it writes `auth.json` atomically and
-sets `last_refresh`.
+    protocol CLISession {
+        func current() throws -> Credential?
+        func parse(_ data: Data) throws -> Credential?
+    }
+
+`CLISession` is read-only. Claudex never writes `.credentials.json`, Claude Code's
+Keychain item, `.claude.json`, or Codex `auth.json`. Account selection changes only
+Claudex's active pointer; the local proxy injects the selected vaulted credential.
 
 State:
 
@@ -180,9 +181,8 @@ generic-password access on top; no `SecItem` call remains in the app.
 Two constraints come with that route. `security` prints a payload as hex when it is not UTF-8,
 and it truncates large generic-password values, so claudex stores its own values base64-encoded
 and splits anything over 2 KB across numbered chunk items behind a manifest. Secrets go in on
-stdin via `security -i`, never in the argument vector, which `ps` can read; the one exception is
-Claude Code's own item, whose exact JSON bytes cannot survive that parser, and which is
-documented in `ClaudeCLIKeychain.writeRaw`.
+stdin via `security -i`, never in the argument vector, which `ps` can read. Claude Code's own
+items are read-only and only touched to clean up a sandboxed login item.
 
 Tokens therefore live in the Keychain. `vault.json` remains only as a migration source for older
 installs. `KeychainCredentialStore.load` moves a legacy entry into the Keychain and deletes it
@@ -201,8 +201,8 @@ Evaluated after every successful poll of the active account:
    fresh (under 10 minutes) and under both thresholds.
 3. Pick the candidate with the lowest 5-hour utilisation. Tie-break on lowest weekly, then
    on the user's manual ordering.
-4. Call `activate`, mark it active, post a notification naming the old and new account and
-   reminding that running sessions keep the old one.
+4. Change the active pointer and post a notification naming the old and new account. Routed
+   sessions use the new account on their next request.
 5. If no candidate qualifies, do nothing and post one "all accounts over threshold"
    notification per limit window, not once per poll. The window's own reset time is the key:
    a new five-hour window is a new situation, the same one is not.
@@ -355,30 +355,13 @@ phase the app shows correct numbers for every imported account and changes nothi
 outside its own container.
 
 Verified end to end against live accounts: both CLIs imported, both usage endpoints parsed,
-the menu bar app polling on its timer and writing snapshots. The one write outside the
-container that Phase 1 does perform is the refresh mirror described below.
+the menu bar app polling on its timer and writing snapshots.
 
-Phase 2 — switching. **Done.** `Switcher.activate` drives it, `--switch <label>` exercises it
-headlessly, and the popover now calls it: an inactive card is itself the control, offering
-"Switch" under the pointer, showing "Switching…" while the call runs, and reporting a failure
-in the panel's notice line. A success refreshes every account of that provider, because the
-swap rotates tokens on both sides and leaves both snapshots stale. The order
-inside `Switcher` carries the correctness, because refresh tokens rotate and the last write
-wins: harvest the outgoing account's live CLI tokens into its vault entry, persist the incoming
-account's refreshed tokens before handing them over, then record the change. Skipping the
-harvest silently invalidates whichever account is switched away from.
-
-The question of whether the file alone suffices is settled: it does not. Both stores must be
-written. Claude Usage Tracker writes the Keychain item, `.credentials.json` and the
-`oauthAccount` block on every switch, and records why — the CLI reads the file first, so a stale
-file shadows a freshly written Keychain item. CCSwitcher writes the Keychain item and treats it
-as authoritative. Since `security` removes the prompt that made the Keychain write costly, the
-write stays in `activate` and the two are kept in step.
-
-Writing an item another application owns turned out to cost nothing either. Verified on
-2026-09-12 by switching the Claude CLI between two live accounts: `Claude Code-credentials` was
-updated through `security` with no authorisation prompt, and a subsequent read returned the new
-credentials. Nothing about the Keychain now distinguishes claudex's own items from a CLI's.
+Phase 2 — proxy account selection. **Done.** `AccountSelector.select` changes one active pointer.
+The proxy resolves that pointer for every request, refreshes the selected vaulted credential,
+drops inbound provider authentication, and injects the selected account's authentication before
+forwarding upstream. Existing sessions therefore change accounts on their next request. No
+provider CLI credential file or Keychain item is rewritten.
 
 Phase 3 — automation. **Done.** `Rotator` evaluates after every successful poll of a
 provider's active account, `--rotate` prints the same decision without acting on it, and the
@@ -428,17 +411,14 @@ and then delete. `security dump-keychain` without `-d` lists attributes only, so
 secret and no prompt. The directory's `.credentials.json` is still tried first, since it is there
 whenever the CLI writes both.
 
-The new account is stored **inactive**, except for the first account of a provider, which the
-CLI is signed into on the spot: adding a second account is not a request to switch to it, but the
-first has nothing to switch away from, and signing in here is now the only way an account reaches
-the CLI at all. Gating is unchanged and happens before anything is stored, because it lives in
-`fetchIdentity`.
+The new account is stored **inactive**, except for the first account of a provider, which becomes
+the proxy's active account immediately. Adding a second account is not a request to select it.
+Gating is unchanged and happens before anything is stored, because it lives in `fetchIdentity`.
 
 Importing whatever the CLI happens to be signed into was the original way in, and is gone. It
 made two ways to add an account, of which one quietly depended on the user having already done
-the other somewhere else. Sign-in is the single door: claudex runs the login, holds the
-credentials, and writes them to the CLI. `readCurrentCLICredentials` stays — the active account's
-tokens still live in the CLI's own storage, and that is where they are read from.
+the other somewhere else. Sign-in is the single door: claudex runs the login and stores the
+result in its own vault. `readCurrentCLICredentials` remains only for diagnostics.
 
 The sign-in writes a transcript to `~/Library/Logs/claudex.log`: what was spawned, every line
 the CLI printed, the identity that came back and what the store did with it. A menu bar app has
@@ -471,31 +451,16 @@ Access tokens last hours and refresh tokens rotate: the token endpoint issues a 
 and retires the one presented. Whoever refreshes must therefore also be able to store the
 result, or the other holder is left with a dead token.
 
-That settles who owns what:
-
-- **The active account belongs to the CLI.** claudex re-reads its credentials from disk on
-  every poll and never refreshes or writes them. The CLI renews its own access token as it
-  runs. If the token has expired because the CLI has not been used in a while, the popover
-  says so and asks for one CLI run, which is a better failure than a silent sign-out.
-- **Inactive accounts belong to claudex.** Nothing else holds them, so they are refreshed
-  here and stored in the vault, with no CLI contact at all.
-
-An earlier design had claudex refresh the active account and mirror the result back into the
-CLI's store, and was dropped when writing another application's Keychain item looked impossible.
-That obstacle is gone, but the ownership rule above stands on its own: two processes refreshing
-the same rotating refresh token race, whatever the mechanism. Phase 1 performs no writes outside
-its own container.
-
-A switch is the one moment the rule hands over, and the handover is why `Switcher` harvests
-before it overwrites. Between claudex's last look and the switch, the CLI has been refreshing
-the outgoing account's token; that newer copy exists only in the CLI's store and is about to be
-replaced. Reading it back into the vault first is what makes the account still usable when it is
-switched to again.
+Claudex owns every tracked credential, active and inactive. Routed CLIs authenticate only to the
+loopback proxy with `X-Claudex-Token`; the proxy replaces inbound provider authentication with a
+vaulted access token. Refreshes are persisted to the vault before use. Provider CLI credential
+stores remain untouched, preventing two processes from rotating the same refresh token.
 
 ## Bounded Keychain calls
 
-`KeychainCredentialStore` owns claudex account items. `ClaudeCLIKeychain` owns Claude Code's
-item. Both use `SecurityCLI`, so no in-process Security framework call can block the app.
+`KeychainCredentialStore` owns Claudex account items. `ClaudeCLIKeychain` provides read-only
+access needed by sandboxed login cleanup. Both use `SecurityCLI`, so no in-process Security
+framework call can block the app.
 
 Every invocation is bounded by an 8-second timeout. `security` itself has been observed to hang
 indefinitely on some macOS builds, and a Keychain call that stalls a poll is worse than one that
@@ -509,7 +474,6 @@ as "unknown" rather than 0%, and a parse failure surfaced in the popover instead
 silently reporting healthy. A false 0% is the one failure mode that would trigger a wrong
 switch, so it is treated as an error state, never as a low reading.
 
-Writing the Claude Keychain item and `.credentials.json` out of sync would log the CLI out.
-Every activation writes to a temp file and renames, keeps a `.claudex-backup` of the
-previous credentials, and rolls back if the Keychain write fails after the file write
-succeeded.
+Routing changes only provider base-URL configuration and preserves backups for disable. Claudex
+refuses to replace an existing foreign gateway. Routed requests fail while Claudex is not
+running, so launch-at-login is recommended.

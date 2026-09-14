@@ -47,6 +47,7 @@ struct SettingsPanel: View {
                 ForEach(ProviderKind.allCases, id: \.self) { kind in
                     RoutingRow(
                         kind: kind,
+                        enabled: state.routingEnabled(kind),
                         state: state.routing.state(for: kind),
                         busy: state.routing.busy == kind,
                         onChange: { state.setRouting(kind, enabled: $0) }
@@ -57,7 +58,7 @@ struct SettingsPanel: View {
             group("Notifications") {
                 SettingRow(
                     title: "Notify on switch",
-                    caption: "Routed CLIs switch on their next request; unrouted CLIs switch in the next session. The notification confirms it happened."
+                    caption: "Routed CLIs switch on their next request. An unrouted CLI keeps using its own signed-in account."
                 ) {
                     Toggle("", isOn: setting(\.notificationsEnabled))
                         .labelsHidden()
@@ -102,7 +103,7 @@ struct SettingsPanel: View {
         """
         Writes ~/.claude/settings.json and ~/.codex/config.toml so a running session picks up \
         an account switch on its next request. Requests fail while Claudex is not running. \
-        Turning a provider off restores its file.
+        Turning a provider off restores its file and disables CLI account switching.
         """
     }
 
@@ -180,6 +181,7 @@ struct SettingsPanel: View {
 /// would be a silent change to how their work reaches a vendor.
 struct RoutingRow: View {
     let kind: ProviderKind
+    let enabled: Bool
     let state: RoutingController.State
     let busy: Bool
     let onChange: (Bool) -> Void
@@ -189,7 +191,7 @@ struct RoutingRow: View {
             if busy {
                 ProgressView().controlSize(.mini)
             } else {
-                Toggle("", isOn: Binding(get: { state == .on }, set: onChange))
+                Toggle("", isOn: Binding(get: { enabled }, set: onChange))
                     .labelsHidden()
                     .toggleStyle(.switch)
                     .controlSize(.mini)
@@ -206,7 +208,7 @@ struct RoutingRow: View {
 
     private var caption: String? {
         switch state {
-        case .off: return nil
+        case .off: return enabled ? "Waiting for routing setup." : "Direct mode. Claudex account changes do not affect this CLI."
         case .on: return "Routed. Sessions already running switch accounts on their next request."
         case .needsRepair: return "Configured for a Claudex that is no longer listening. Turn routing on to repair."
         case .blocked(let reason): return "\(reason). Claudex will not change it."

@@ -69,7 +69,6 @@ private struct StubClaudeCLI: CLISession {
     let state: StubProviderState
     func current() throws -> ClaudeCredentials? { state.current() }
     func parse(_ data: Data) throws -> ClaudeCredentials? { nil }
-    func activate(_ credential: ClaudeCredentials, identity: Identity) throws {}
 }
 
 @MainActor
@@ -131,21 +130,22 @@ private struct StubClaudeCLI: CLISession {
         return (UsageReader(store: store, providers: ProviderRegistry([provider])), credentials)
     }
 
-    @Test func activeReadingMirrorsLiveCredentialWithoutRefreshing() async throws {
+    @Test func activeReadingUsesAndRefreshesVaultWithoutReadingCLIStorage() async throws {
         let account = account()
         let stored = credential("stored")
         let live = credential("live")
+        let renewed = credential("renewed")
         let state = StubProviderState(
             usageResults: [.success(snapshot())],
             currentCredential: live,
-            refreshedCredential: credential("renewed"),
+            refreshedCredential: renewed,
             refreshNeeded: true
         )
         let (reader, credentials) = reader(account: account, active: true, stored: stored, state: state)
 
         #expect(try await reader.reading(for: account) == snapshot())
-        #expect(credentials.load(account.id) == .claude(live))
-        #expect(state.events == ["current", "usage"])
+        #expect(credentials.load(account.id) == .claude(renewed))
+        #expect(state.events == ["refresh", "usage"])
     }
 
     @Test func inactiveExpiringCredentialRefreshesAndPersistsBeforeUsage() async throws {
@@ -183,23 +183,18 @@ private struct StubClaudeCLI: CLISession {
         #expect(state.events == ["usage", "refresh", "usage"])
     }
 
-    @Test func activeUnauthorizedReadingAsksCLIToRenew() async {
+    @Test func activeUnauthorizedReadingRefreshesVaultAndRetries() async throws {
         let account = account()
         let state = StubProviderState(
-            usageResults: [.failure(ClaudexError.http(401, "expired"))],
+            usageResults: [.failure(ClaudexError.http(401, "expired")), .success(snapshot())],
             currentCredential: credential("live"),
             refreshedCredential: credential("renewed"),
             refreshNeeded: false
         )
         let (reader, _) = reader(account: account, active: true, stored: credential("stored"), state: state)
 
-        do {
-            _ = try await reader.reading(for: account)
-            Issue.record("Expected active credential failure")
-        } catch {
-            #expect(error.localizedDescription.contains("Run the CLI once"))
-            #expect(!state.events.contains("refresh"))
-        }
+        #expect(try await reader.reading(for: account) == snapshot())
+        #expect(state.events == ["usage", "refresh", "usage"])
     }
 
     @Test func secondConsecutiveInactiveRateLimitRefreshesOnce() async throws {

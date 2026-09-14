@@ -93,21 +93,24 @@ public final class RoutingController {
         }
     }
 
-    /// Called once at launch. Repairs the port for providers the user already routed, and
-    /// touches nothing else.
-    ///
-    /// Rewriting a stale port is finishing a decision the user made, not making one for them.
-    /// A provider whose config claudex has never seen stays untouched, because a menu bar app
-    /// starting up is not consent to reroute a CLI.
-    public func repairOnLaunch() async {
+    /// Applies the persisted routing preference at launch. Proxy-only switching defaults both
+    /// providers on, so a fresh install writes routing after the app first opens. A foreign
+    /// gateway remains untouched.
+    public func configureOnLaunch(enabledProviders: Set<ProviderKind>) async {
         refresh()
-        let stale = ProviderKind.allCases.filter {
-            if case .needsRepair = state(for: $0) { return true }
-            return false
-        }
-        guard !stale.isEmpty else { return }
-        for kind in stale {
-            await enable(kind)
+        for kind in ProviderKind.allCases {
+            let state = state(for: kind)
+            if enabledProviders.contains(kind) {
+                switch state {
+                case .on, .blocked: break
+                case .off, .needsRepair, .failed: await enable(kind)
+                }
+            } else {
+                switch state {
+                case .on, .needsRepair: await disable(kind)
+                case .off, .blocked, .failed: break
+                }
+            }
         }
     }
 

@@ -1,7 +1,7 @@
 # Claudex
 
-Claudex is a macOS menu bar app for tracking and switching between Claude and
-Codex subscription accounts.
+Claudex is a macOS menu bar app that tracks Claude and Codex subscription
+accounts and routes each CLI request through the selected account.
 
 It shows 5-hour and weekly usage, keeps credentials in macOS Keychain, and can
 switch accounts before a limit interrupts your work.
@@ -67,6 +67,7 @@ they cannot remove this warning.
 ## First setup
 
 1. Open Claudex from Applications. It lives in the menu bar, not the Dock.
+   On first launch it configures Claude and Codex to use Claudex's local proxy.
 2. Click its menu bar ring.
 3. Click `+` beside Claude or Codex.
 4. Complete the provider's browser sign-in.
@@ -80,7 +81,7 @@ sign-in. API keys are rejected. Multiple accounts may share one email address.
 
 - Track 5-hour and weekly limits for Claude and Codex.
 - Keep multiple accounts per provider.
-- Switch the provider CLI into another saved account.
+- Route each provider CLI through another saved account without rewriting its credentials.
 - Rotate automatically when either usage threshold is crossed.
 - Show one menu bar ring per active provider.
 - Store tokens in macOS Keychain.
@@ -121,7 +122,7 @@ The bundled binary also works headlessly.
 | `--probe` | Read both CLIs and print parsed identity and usage. Writes nothing. |
 | `--vault` | Round-trip a throwaway credential through the vault. |
 | `--poll` | Run one poll cycle through the vault and print each step. |
-| `--switch <label>` | Sign a CLI into a tracked account. |
+| `--switch <label>` | Select a tracked account for proxy routing. |
 | `--rotate` | Print the current rotation decision without switching. |
 | `--login <provider>` | Add an account through the provider CLI's browser login. |
 | `--list` | List stored accounts and last known usage. |
@@ -139,9 +140,9 @@ Claudex stores metadata and cached usage here:
 ~/Library/Application Support/claudex/snapshots.json
 ```
 
-Tokens live in one macOS Keychain item per account. Claudex never refreshes or
-writes credentials for an account while its CLI is active. Active credentials
-are re-read and mirrored on each poll. Inactive accounts can be refreshed normally.
+Tokens live in one macOS Keychain item per account. Claudex owns and refreshes
+these vaulted credentials. It reads provider CLI credentials only during import,
+diagnostics, or sandboxed sign-in and never rewrites provider credential stores.
 
 ## Status
 

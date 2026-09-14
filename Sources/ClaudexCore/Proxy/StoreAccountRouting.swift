@@ -6,10 +6,8 @@ import Foundation
 /// before a switch still asks this object which account to use on its next request, so the
 /// switch reaches a session already running without restarting it.
 ///
-/// Proxy mode also inverts credential ownership. Under native file switching the CLI's active
-/// credential belongs to the CLI, because a running process is holding it. Here the routed
-/// processes hold only the local proxy token, so every routed credential is claudex's to
-/// refresh and persist — including the active one.
+/// Routed processes hold only the local proxy token, so every routed provider credential is
+/// Claudex's to refresh and persist, including the active one.
 @MainActor
 public final class StoreAccountRouting: AccountRouting {
     private let store: AccountStore

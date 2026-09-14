@@ -18,8 +18,8 @@ public protocol UsageAPI: Sendable {
     func needsRefresh(_ credential: Credential, leeway: TimeInterval) -> Bool
 }
 
-/// The local half of a CLI: the credential store it keeps on disk, and the config it reads its
-/// identity from. Touches files and no network.
+/// Read and parse credentials produced by a CLI. Claudex never writes these stores; routed
+/// requests use credentials from its own vault.
 public protocol CLISession: Sendable {
     associatedtype Credential: ProviderCredential
 
@@ -30,9 +30,6 @@ public protocol CLISession: Sendable {
     /// item, or the throwaway directory a sandboxed sign-in writes. Nil when the bytes are a
     /// credential store with nothing signed in.
     func parse(_ data: Data) throws -> Credential?
-
-    /// Write a credential into the CLI's own storage, so the next `current()` reads it back.
-    func activate(_ credential: Credential, identity: Identity) throws
 }
 
 /// The store keeps every provider's credentials in one shape; each half above works in its own.
@@ -64,8 +61,8 @@ extension CodexCredentials: ProviderCredential {
     public var boxed: Credentials { .codex(self) }
 }
 
-/// One CLI's two halves, speaking `Credentials` on the outside so the poll path and the
-/// switcher can hold either provider without naming which. Unboxing happens here and nowhere
+/// One CLI's two halves, speaking `Credentials` on the outside so callers can hold either
+/// provider without naming which. Unboxing happens here and nowhere
 /// else: below this line each half works in its own credential shape.
 public struct AnyProvider: Sendable {
     public let kind: ProviderKind
@@ -76,7 +73,6 @@ public struct AnyProvider: Sendable {
     private let _needsRefresh: @Sendable (Credentials, TimeInterval) -> Bool
     private let _current: @Sendable () throws -> Credentials?
     private let _parse: @Sendable (Data) throws -> Credentials?
-    private let _activate: @Sendable (Credentials, Identity) throws -> Void
 
     public init<API: UsageAPI, CLI: CLISession>(
         kind: ProviderKind,
@@ -96,7 +92,6 @@ public struct AnyProvider: Sendable {
         }
         _current = { try cli.current()?.boxed }
         _parse = { try cli.parse($0)?.boxed }
-        _activate = { try cli.activate(Credential(unboxing: $0), identity: $1) }
     }
 
     public func usage(_ credentials: Credentials) async throws -> UsageSnapshot {
@@ -119,10 +114,6 @@ public struct AnyProvider: Sendable {
     public func currentCLICredentials() throws -> Credentials? { try _current() }
 
     public func parseCLICredentials(_ data: Data) throws -> Credentials? { try _parse(data) }
-
-    public func activate(_ credentials: Credentials, identity: Identity) throws {
-        try _activate(credentials, identity)
-    }
 }
 
 /// Provider selection is assembled once and injected into callers. Tests can replace either

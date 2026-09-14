@@ -118,15 +118,15 @@ public enum Rotation {
 public final class Rotator {
     private let store: AccountStore
     private let notifier: Notifier
-    private let switcher: any AccountSwitching
+    private let selector: any AccountSelecting
     private var lastSwitch: [ProviderKind: Date] = [:]
     private var announcedBlock: [ProviderKind: String] = [:]
     private var evaluating: Set<ProviderKind> = []
 
-    public init(store: AccountStore, notifier: Notifier, switcher: any AccountSwitching) {
+    public init(store: AccountStore, notifier: Notifier, selector: any AccountSelecting) {
         self.store = store
         self.notifier = notifier
-        self.switcher = switcher
+        self.selector = selector
     }
 
     public func noteManualSwitch(_ kind: ProviderKind) {
@@ -165,13 +165,12 @@ public final class Rotator {
 
     private func perform(_ target: Account, from outgoing: Account) async {
         do {
-            guard try await switcher.activate(target) else { return }
+            guard try await selector.select(target) else { return }
             lastSwitch[target.provider] = Date()
             announcedBlock[target.provider] = nil
             notify(
                 title: "Switched \(target.provider.displayName) to \(target.label)",
-                body: "\(outgoing.label) passed its limit. Sessions already running keep using it — "
-                    + "the change applies to the next one you start."
+                body: "\(outgoing.label) passed its limit. Routed sessions use \(target.label) on their next request."
             )
         } catch {
             notify(

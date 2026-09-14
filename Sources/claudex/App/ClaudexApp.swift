@@ -4,6 +4,7 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
+    private let store: AccountStore
     private let state: PanelState
     /// One status item carrying every provider's ring. Active is a per-provider fact — signing a
     /// Claude account in does not change which Codex account is live — so each provider needs
@@ -17,11 +18,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     override init() {
         let providers = ProviderRegistry.live()
         let store = AccountStore(credentialStore: KeychainCredentialStore())
-        let switcher = Switcher(store: store, providers: providers)
-        let login = SandboxedLogin(store: store, providers: providers, switcher: switcher)
+        let selector = AccountSelector(store: store)
+        let login = SandboxedLogin(store: store, providers: providers, selector: selector)
         let reader = UsageReader(store: store, providers: providers)
         let notifier = Notifier()
-        let rotator = Rotator(store: store, notifier: notifier, switcher: switcher)
+        let rotator = Rotator(store: store, notifier: notifier, selector: selector)
         let engine = UsageEngine(
             store: store,
             activity: LocalUsageActivity(),
@@ -35,8 +36,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             proxy: LoopbackAccountProxy(routing: StoreAccountRouting(store: store, providers: providers)),
             installer: NativeCLIRoutingInstaller.live()
         )
+        self.store = store
         self.routing = routing
-        self.state = PanelState(store: store, engine: engine, switcher: switcher, login: login, routing: routing)
+        self.state = PanelState(store: store, engine: engine, selector: selector, login: login, routing: routing)
         super.init()
     }
 
@@ -58,10 +60,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         observeStatusIcon()
         state.engine.start()
 
-        // The listener binds an ephemeral port, so a CLI routed in an earlier run points at a
-        // port nobody holds. Repairing that is finishing the user's decision; a CLI claudex was
-        // never asked to route stays untouched.
-        Task { await routing.repairOnLaunch() }
+        // Homebrew and DMG installation only copy the bundle. First app launch starts the local
+        // proxy and writes the provider routing selected in Claudex settings.
+        Task { await routing.configureOnLaunch(enabledProviders: store.settings.routedProviders) }
     }
 
     /// Drain in-flight responses before the process goes. Asking AppKit to wait keeps the main

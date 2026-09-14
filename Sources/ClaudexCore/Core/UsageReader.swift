@@ -23,9 +23,7 @@ public final class UsageReader {
     public func reading(for account: Account) async throws -> UsageSnapshot {
         let provider = try providers.provider(for: account.provider)
         do {
-            let snapshot = store.isActive(account)
-                ? try await readActive(account, with: provider)
-                : try await readInactive(account, with: provider)
+            let snapshot = try await read(account, with: provider)
             rateLimitRecovery.reset(account.id)
             return snapshot
         } catch {
@@ -36,25 +34,9 @@ public final class UsageReader {
         }
     }
 
-    /// Running CLIs retain credentials in memory. Refreshing their account here could retire the
-    /// token a live process still holds, so active credentials are mirrored but never refreshed.
-    private func readActive(_ account: Account, with provider: AnyProvider) async throws -> UsageSnapshot {
-        guard let live = try provider.currentCLICredentials() else {
-            throw ClaudexError.notSignedIn(account.provider)
-        }
-        if try store.credentials(for: account) != live {
-            try store.storeCredentials(live, for: account)
-        }
-        do {
-            return try await provider.usage(live)
-        } catch let error as ClaudexError where error.isUnauthorized {
-            throw ClaudexError.unsupportedAccount(
-                "\(account.provider.displayName) token has expired. Run the CLI once to renew it."
-            )
-        }
-    }
-
-    private func readInactive(_ account: Account, with provider: AnyProvider) async throws -> UsageSnapshot {
+    /// Routed CLIs carry only a local proxy token. Claudex's vault therefore owns active and
+    /// inactive provider credentials alike.
+    private func read(_ account: Account, with provider: AnyProvider) async throws -> UsageSnapshot {
         guard var credentials = try store.credentials(for: account) else {
             throw ClaudexError.unsupportedAccount("No stored credentials for \(account.label)")
         }

@@ -29,11 +29,11 @@ extension Probe {
     static func renderPanel(path: String) {
         let providers = ProviderRegistry.live()
         let store = AccountStore(credentialStore: KeychainCredentialStore())
-        let switcher = Switcher(store: store, providers: providers)
-        let login = SandboxedLogin(store: store, providers: providers, switcher: switcher)
+        let selector = AccountSelector(store: store)
+        let login = SandboxedLogin(store: store, providers: providers, selector: selector)
         let reader = UsageReader(store: store, providers: providers)
         let notifier = Notifier()
-        let rotator = Rotator(store: store, notifier: notifier, switcher: switcher)
+        let rotator = Rotator(store: store, notifier: notifier, selector: selector)
         let engine = UsageEngine(
             store: store,
             activity: LocalUsageActivity(),
@@ -52,7 +52,7 @@ extension Probe {
                 backups: scratch.appending(path: "routing.json")
             )
         )
-        let state = PanelState(store: store, engine: engine, switcher: switcher, login: login, routing: routing)
+        let state = PanelState(store: store, engine: engine, selector: selector, login: login, routing: routing)
         // AppKit needs its application object before a view can be laid out, and the panel is
         // laid out here on the real main thread rather than on the main queue: under
         // `dispatchMain()` the two are not the same thread.

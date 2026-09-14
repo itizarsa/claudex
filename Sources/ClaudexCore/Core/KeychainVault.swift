@@ -58,9 +58,8 @@ public struct KeychainCredentialStore: CredentialStore {
     }
 }
 
-/// The Keychain item Claude Code itself uses. Read in Phase 1; written in Phase 2, where it must
-/// be kept in step with `~/.claude/.credentials.json` — the CLI reads the file first and a stale
-/// file shadows a freshly written item.
+/// Read-only access to Keychain items Claude Code creates. The temporary-login path deletes its
+/// own item after copying credentials into Claudex's vault.
 enum ClaudeCLIKeychain {
     private static let service = "Claude Code-credentials"
     private static var account: String { NSUserName() }
@@ -104,21 +103,6 @@ enum ClaudeCLIKeychain {
 
     static func delete(service: String) throws {
         _ = try SecurityCLI.run(["delete-generic-password", "-s", service, "-a", account])
-    }
-
-    /// Unlike claudex's own items this value cannot be base64-wrapped — Claude Code expects the
-    /// exact JSON bytes — so it cannot travel through `security -i`, whose parser would strip the
-    /// quotes. It goes in the argument vector instead, where it is briefly visible to `ps`. The
-    /// same token is already readable in `~/.claude/.credentials.json` by any process running as
-    /// this user, so this widens the window rather than the audience.
-    static func writeRaw(_ data: Data) throws {
-        let output = try SecurityCLI.run([
-            "add-generic-password", "-U", "-s", service, "-a", account,
-            "-w", String(decoding: data, as: UTF8.self),
-        ])
-        guard output.exitCode == 0 else {
-            throw ClaudexError.unsupportedAccount("Claude Code Keychain write failed (exit \(output.exitCode))")
-        }
     }
 
     /// `security` prints a non-UTF8 payload as hex. Claude Code stores JSON text, so the hex form

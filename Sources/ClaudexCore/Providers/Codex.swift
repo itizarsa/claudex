@@ -102,7 +102,7 @@ public struct CodexAPI: UsageAPI {
     }
 }
 
-/// The Codex CLI's own credential store: `auth.json` under `~/.codex`.
+/// Read-only access to Codex CLI's own credential store.
 public struct CodexCLI: CLISession {
     public init() {}
 
@@ -133,27 +133,6 @@ public struct CodexCLI: CLISession {
         )
     }
 
-    public func activate(_ credential: CodexCredentials, identity: Identity) throws {
-        var root: [String: Any] = [:]
-        if let existing = try? Data(contentsOf: Paths.codexAuth),
-           let object = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
-            root = object
-        }
-
-        root["auth_mode"] = "chatgpt"
-        root["OPENAI_API_KEY"] = NSNull()
-        root["tokens"] = [
-            "id_token": credential.idToken,
-            "access_token": credential.accessToken,
-            "refresh_token": credential.refreshToken,
-            "account_id": credential.accountID.isEmpty ? identity.remoteID : credential.accountID,
-        ]
-        root["last_refresh"] = ISO8601.string(from: credential.lastRefresh ?? Date())
-
-        let data = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
-        try AtomicFile.backup(Paths.codexAuth)
-        try AtomicFile.write(data, to: Paths.codexAuth)
-    }
 }
 
 enum JWT {

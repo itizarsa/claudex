@@ -33,44 +33,8 @@ private final class RecordingCredentialStore: CredentialStore, @unchecked Sendab
     func delete(_ id: UUID) { lock.withLock { values[id] = nil } }
 }
 
-private struct SwitchingAPI: UsageAPI {
-    let trace: SwitchTrace
-    let refreshedCredential: ClaudeCredentials
-    let identityValue: Identity
-
-    func usage(_ credential: ClaudeCredentials) async throws -> UsageSnapshot {
-        throw ClaudexError.decoding("unused")
-    }
-    func identity(_ credential: ClaudeCredentials) async throws -> Identity {
-        trace.append("identity")
-        return identityValue
-    }
-    func refreshed(_ credential: ClaudeCredentials) async throws -> ClaudeCredentials {
-        trace.append("refresh")
-        return refreshedCredential
-    }
-    func needsRefresh(_ credential: ClaudeCredentials, leeway: TimeInterval) -> Bool {
-        trace.append("needs refresh")
-        return credential.refreshToken == "incoming"
-    }
-}
-
-private struct SwitchingCLI: CLISession {
-    let trace: SwitchTrace
-    let currentCredential: ClaudeCredentials
-
-    func current() throws -> ClaudeCredentials? {
-        trace.append("current")
-        return currentCredential
-    }
-    func parse(_ data: Data) throws -> ClaudeCredentials? { nil }
-    func activate(_ credential: ClaudeCredentials, identity: Identity) throws {
-        trace.append("activate")
-    }
-}
-
 @MainActor
-@Suite struct SwitcherTests {
+@Suite struct AccountSelectorTests {
     private func identity(_ remoteID: String = "remote") -> Identity {
         Identity(
             email: "person@example.com",
@@ -94,7 +58,7 @@ private struct SwitchingCLI: CLISession {
         )
     }
 
-    @Test func harvestsBeforeRefreshingAndActivating() async throws {
+    @Test func selectingReadsOnlyIncomingVaultCredential() async throws {
         let outgoing = Account(provider: .claude, label: "Outgoing", identity: identity(), order: 0)
         let incoming = Account(provider: .claude, label: "Incoming", identity: identity("incoming"), order: 1)
         let trace = SwitchTrace()
@@ -111,39 +75,20 @@ private struct SwitchingCLI: CLISession {
             active: [.claude: outgoing.id],
             credentialStore: credentials
         )
-        let api = SwitchingAPI(
-            trace: trace,
-            refreshedCredential: credential("renewed"),
-            identityValue: identity()
-        )
-        let cli = SwitchingCLI(trace: trace, currentCredential: credential("outgoing"))
-        let switcher = Switcher(
-            store: store,
-            providers: ProviderRegistry([AnyProvider(kind: .claude, api: api, cli: cli)])
-        )
+        let selector = AccountSelector(store: store)
 
-        #expect(try await switcher.activate(incoming))
-        #expect(trace.events == [
-            "current",
-            "load outgoing",
-            "store outgoing",
-            "load incoming",
-            "needs refresh",
-            "refresh",
-            "store incoming",
-            "activate",
-        ])
+        #expect(try await selector.select(incoming))
+        #expect(trace.events == ["load incoming"])
         #expect(store.isActive(incoming))
     }
 
-    @Test func untrackedLiveAccountStopsBeforeActivation() async {
+    @Test func selectingAccountWithoutVaultCredentialFails() async {
         let outgoing = Account(provider: .claude, label: "Outgoing", identity: identity(), order: 0)
         let incoming = Account(provider: .claude, label: "Incoming", identity: identity("incoming"), order: 1)
         let trace = SwitchTrace()
         let credentials = RecordingCredentialStore(
             values: [
                 outgoing.id: .claude(credential("outgoing")),
-                incoming.id: .claude(credential("incoming")),
             ],
             names: [outgoing.id: "outgoing", incoming.id: "incoming"],
             trace: trace
@@ -153,19 +98,10 @@ private struct SwitchingCLI: CLISession {
             active: [.claude: outgoing.id],
             credentialStore: credentials
         )
-        let api = SwitchingAPI(
-            trace: trace,
-            refreshedCredential: credential("renewed"),
-            identityValue: identity("untracked")
-        )
-        let cli = SwitchingCLI(trace: trace, currentCredential: credential("unknown"))
-        let switcher = Switcher(
-            store: store,
-            providers: ProviderRegistry([AnyProvider(kind: .claude, api: api, cli: cli)])
-        )
+        let selector = AccountSelector(store: store)
 
-        await #expect(throws: ClaudexError.self) { try await switcher.activate(incoming) }
-        #expect(!trace.events.contains("activate"))
+        await #expect(throws: ClaudexError.self) { try await selector.select(incoming) }
+        #expect(trace.events == ["load incoming"])
         #expect(store.isActive(outgoing))
     }
 }

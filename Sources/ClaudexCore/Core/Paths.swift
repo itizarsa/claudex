@@ -15,7 +15,7 @@ enum Paths {
     static var routingFile: URL { support.appending(path: "routing.json") }
     static var vaultFile: URL { support.appending(path: "vault.json") }
 
-    // CLI state we read, and (for the active account only) mirror refreshed tokens back to.
+    // CLI state is read-only. Routed requests use credentials from Claudex's vault.
     static var claudeCredentials: URL { home.appending(path: ".claude/.credentials.json") }
     static var claudeConfig: URL { home.appending(path: ".claude.json") }
     static var claudeProjects: URL { home.appending(path: ".claude/projects", directoryHint: .isDirectory) }

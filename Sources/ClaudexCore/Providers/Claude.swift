@@ -121,8 +121,7 @@ public struct ClaudeAPI: UsageAPI {
     }
 }
 
-/// Claude Code's own credential store: `~/.claude/.credentials.json`, its Keychain twin, and
-/// the identity block in `~/.claude.json`.
+/// Read-only access to Claude Code's own credential store.
 public struct ClaudeCLI: CLISession {
     public init() {}
 
@@ -158,66 +157,4 @@ public struct ClaudeCLI: CLISession {
         )
     }
 
-    public func activate(_ credential: ClaudeCredentials, identity: Identity) throws {
-        // Preserve everything else in the file, notably the mcpOAuth block, by editing the
-        // decoded object rather than writing a fresh one.
-        var root: [String: Any] = [:]
-        if let existing = try? Data(contentsOf: Paths.claudeCredentials),
-           let object = try? JSONSerialization.jsonObject(with: existing) as? [String: Any] {
-            root = object
-        }
-
-        var oauth: [String: Any] = [
-            "accessToken": credential.accessToken,
-            "refreshToken": credential.refreshToken,
-            "expiresAt": credential.expiresAt,
-            "scopes": credential.scopes,
-        ]
-        if let value = credential.refreshTokenExpiresAt { oauth["refreshTokenExpiresAt"] = value }
-        if let value = credential.subscriptionType { oauth["subscriptionType"] = value }
-        if let value = credential.rateLimitTier { oauth["rateLimitTier"] = value }
-        root["claudeAiOauth"] = oauth
-
-        let data = try JSONSerialization.data(withJSONObject: root, options: [.sortedKeys])
-
-        try AtomicFile.backup(Paths.claudeCredentials)
-        try AtomicFile.write(data, to: Paths.claudeCredentials)
-
-        // Claude Code keeps the same bytes in a Keychain item. If that write fails after the
-        // file write succeeds, restore the previous file so its two sources cannot disagree.
-        do {
-            try ClaudeCLIKeychain.writeRaw(data)
-        } catch {
-            let backup = Paths.claudeCredentials.appendingPathExtension("claudex-backup")
-            if let previous = try? Data(contentsOf: backup) {
-                try? AtomicFile.write(previous, to: Paths.claudeCredentials)
-            }
-            throw error
-        }
-
-        updateConfigIdentity(identity)
-    }
-
-    /// Keep `~/.claude.json`'s `oauthAccount` in step so the CLI does not display a stale
-    /// identity. Best effort: a failure here is cosmetic, not a sign-in problem.
-    private func updateConfigIdentity(_ identity: Identity) {
-        guard let data = try? Data(contentsOf: Paths.claudeConfig),
-              var root = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return }
-
-        var oauthAccount = root["oauthAccount"] as? [String: Any] ?? [:]
-        oauthAccount["emailAddress"] = identity.email
-        oauthAccount["accountUuid"] = identity.remoteID
-        // Both name fields, or the CLI shows the incoming account's email beside the outgoing
-        // account's name.
-        if let name = identity.displayName {
-            oauthAccount["displayName"] = name
-            oauthAccount["fullName"] = name
-        }
-        if let organization = identity.organization { oauthAccount["organizationName"] = organization }
-        root["oauthAccount"] = oauthAccount
-
-        guard let encoded = try? JSONSerialization.data(withJSONObject: root) else { return }
-        try? AtomicFile.write(encoded, to: Paths.claudeConfig)
-    }
 }
