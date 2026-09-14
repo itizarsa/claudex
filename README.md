@@ -1,72 +1,149 @@
-# claudex
+# Claudex
 
-A macOS menu bar app that tracks 5-hour and weekly usage across multiple Claude and Codex
-accounts, and switches the active account when usage crosses a threshold.
+Claudex is a macOS menu bar app for tracking and switching between Claude and
+Codex subscription accounts.
 
-Claude accounts must be claude.ai subscriptions; Codex accounts must be ChatGPT sign-ins.
-API keys are rejected. Several accounts may share one email address.
+It shows 5-hour and weekly usage, keeps credentials in macOS Keychain, and can
+switch accounts before a limit interrupts your work.
 
-## Build
+<p align="center">
+  <img src="docs/screenshots/accounts.png" width="280" alt="Claudex account usage panel with mock Claude and Codex accounts">
+  <img src="docs/screenshots/settings.png" width="280" alt="Claudex rotation, notification, polling, and startup settings">
+</p>
 
-Requires the Xcode Command Line Tools. Xcode itself is not needed.
+## Install
 
-    make bundle     # build/Claudex.app
-    make dmg        # build/Claudex-0.1.0.dmg
-    make install    # copy to /Applications
-    make run        # rebuild and launch
+Requires Apple silicon and macOS 14 Sonoma or newer.
+
+### Homebrew
+
+Recommended. Two commands on first install:
+
+Homebrew 7 asks you to trust third-party casks first. Trust only Claudex:
+
+```sh
+brew trust --cask itizarsa/tap/claudex
+brew install --cask itizarsa/tap/claudex
+```
+
+Then open Claudex from Applications.
+
+### mise
+
+Add Claudex to `mise.toml`:
+
+```toml
+[bootstrap.packages]
+"brew-cask:itizarsa/tap/claudex" = "latest"
+```
+
+Install it:
+
+```sh
+mise bootstrap packages apply --manager brew-cask
+```
+
+### DMG
+
+[Download latest release](https://github.com/itizarsa/claudex/releases/latest), open
+the DMG, then drag Claudex into Applications.
+
+### First launch warning
+
+Claudex 0.1.0 is ad-hoc signed and not notarized. macOS may show:
+
+> Apple could not verify "Claudex.app" is free of malware.
+
+To open it once:
+
+1. Try opening Claudex.
+2. Open System Settings.
+3. Go to Privacy & Security.
+4. Find the Claudex message and click Open Anyway.
+
+Do not disable Gatekeeper globally. Homebrew and mise install the same DMG, so
+they cannot remove this warning.
+
+## First setup
+
+1. Open Claudex from Applications. It lives in the menu bar, not the Dock.
+2. Click its menu bar ring.
+3. Click `+` beside Claude or Codex.
+4. Complete the provider's browser sign-in.
+5. Repeat for every account you want to track.
+6. Open the gear menu to set rotation thresholds and polling intervals.
+
+Claude accounts must be claude.ai subscriptions. Codex accounts must use ChatGPT
+sign-in. API keys are rejected. Multiple accounts may share one email address.
+
+## Features
+
+- Track 5-hour and weekly limits for Claude and Codex.
+- Keep multiple accounts per provider.
+- Switch the provider CLI into another saved account.
+- Rotate automatically when either usage threshold is crossed.
+- Show one menu bar ring per active provider.
+- Store tokens in macOS Keychain.
+- Launch at login and notify after automatic switches.
+
+## Build from source
+
+Requires Xcode Command Line Tools. Full Xcode is not needed.
+
+```sh
+make bundle     # build/Claudex.app
+make dmg        # build/Claudex-0.1.0.dmg
+make install    # copy to /Applications and launch
+make run        # rebuild and launch
+```
 
 ## Release
 
-Push a semantic-version tag to build and publish a GitHub Release:
+Push a semantic-version tag:
 
-    git tag -a v0.1.0 -m "v0.1.0"
-    git push origin v0.1.0
+```sh
+git tag -a v0.1.1 -m "v0.1.1"
+git push origin v0.1.1
+```
 
-GitHub Actions runs tests, builds `Claudex-0.1.0.dmg`, and attaches it to the release. The Release
-DMG workflow can also be started manually with an existing tag. Builds are ad-hoc signed, not
-Developer ID signed or notarized.
+GitHub Actions runs tests, builds the versioned DMG, and attaches it to a GitHub
+Release. The workflow also supports manual runs for an existing tag.
 
-## First run
+Builds remain ad-hoc signed until Developer ID signing and Apple notarization are
+configured.
 
-Open the app and use the plus button for each provider, or do it headlessly:
+## Diagnostic commands
 
-    ./build/Claudex.app/Contents/MacOS/claudex --login claude
-    ./build/Claudex.app/Contents/MacOS/claudex --login codex
-
-## Headless flags
-
-The same binary runs as a diagnostic tool.
+The bundled binary also works headlessly.
 
 | Flag | Effect |
 | --- | --- |
-| `--probe` | Read both CLIs, print parsed identity and usage. Writes nothing. |
+| `--probe` | Read both CLIs and print parsed identity and usage. Writes nothing. |
 | `--vault` | Round-trip a throwaway credential through the vault. |
-| `--poll` | One poll cycle through the vault, printing each step. |
+| `--poll` | Run one poll cycle through the vault and print each step. |
 | `--switch <label>` | Sign a CLI into a tracked account. |
-| `--rotate` | Print the current automatic-rotation decision without switching. |
+| `--rotate` | Print the current rotation decision without switching. |
 | `--login <provider>` | Add an account through the provider CLI's browser login. |
-| `--list` | Stored accounts and last known usage. |
+| `--list` | List stored accounts and last known usage. |
 
-`--probe` is the quickest way to tell whether the undocumented usage endpoints still return
-the shape this app expects.
+`--probe` is the quickest check when a provider changes an undocumented usage
+endpoint.
 
-## Where state lives
+## Data and credentials
 
-    ~/Library/Application Support/claudex/accounts.json    metadata, ordering, active account
-    ~/Library/Application Support/claudex/settings.json    thresholds, poll intervals
-    ~/Library/Application Support/claudex/snapshots.json   last known usage
+Claudex stores metadata and cached usage here:
 
-Tokens live in one macOS Keychain item per account. claudex reaches the Keychain through
-`/usr/bin/security`, whose stable Apple signature allows locally built versions to use those
-items without an authorization prompt. Older `vault.json` entries migrate into the Keychain on
-first read and are then deleted.
+```text
+~/Library/Application Support/claudex/accounts.json
+~/Library/Application Support/claudex/settings.json
+~/Library/Application Support/claudex/snapshots.json
+```
 
-claudex never refreshes or writes the credentials of the account a CLI is currently signed
-into. Refresh tokens rotate, and a running CLI keeps its old token in memory even after claudex
-writes the replacement to disk and Keychain. Active credentials are re-read and mirrored on each
-poll. Accounts that are not active belong to claudex and are refreshed normally.
+Tokens live in one macOS Keychain item per account. Claudex never refreshes or
+writes credentials for an account while its CLI is active. Active credentials
+are re-read and mirrored on each poll. Inactive accounts can be refreshed normally.
 
 ## Status
 
-Tracking, switching, automatic rotation, and in-app sign-in are implemented. See PLAN.md for
-design details.
+Tracking, switching, automatic rotation, and in-app sign-in are implemented.
+See [PLAN.md](PLAN.md) for design details.
