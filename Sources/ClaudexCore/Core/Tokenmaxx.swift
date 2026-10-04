@@ -21,6 +21,7 @@ public enum Tokenmaxx {
     /// its shebang asks for. These are where the usual installers put them.
     private static let searchPath = [
         "\(NSHomeDirectory())/.bun/bin",
+        "\(NSHomeDirectory())/.local/share/mise/shims",
         "/opt/homebrew/bin",
         "/usr/local/bin",
         "/usr/bin",
