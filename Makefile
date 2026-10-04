@@ -21,7 +21,7 @@ TESTFW   := $(wildcard $(DEVDIR)/Library/Developer/Frameworks)
 TESTLIB  := $(DEVDIR)/Library/Developer/usr/lib
 TESTARGS := $(if $(TESTFW),-Xswiftc -F -Xswiftc $(TESTFW) -Xlinker -rpath -Xlinker $(TESTFW) -Xlinker -rpath -Xlinker $(TESTLIB))
 
-.PHONY: all build test icon bundle dmg install uninstall verify run prototype prototype-accounts clean
+.PHONY: all build test icon bundle dmg install uninstall verify run prototype clean
 
 all: bundle
 
@@ -85,7 +85,7 @@ uninstall:
 	rm -rf /Applications/$(APP).app
 	@echo "removed /Applications/$(APP).app"
 	@echo "turn off Launch at login before uninstalling, or clear it in System Settings > General > Login Items"
-	@echo "accounts and tokens are left in ~/Library/Application Support/claudex and the Keychain"
+	@echo "tokenmaxx accounts and credentials are untouched"
 
 run: bundle
 	pkill -x claudex 2>/dev/null || true
@@ -93,9 +93,6 @@ run: bundle
 
 prototype:
 	open Sources/claudex/App/UsagePopover.prototype.html
-
-prototype-accounts:
-	open Sources/claudex/App/AccountBrowser.prototype.html
 
 clean:
 	rm -rf .build build

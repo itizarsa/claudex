@@ -1,36 +1,6 @@
 import Foundation
 
-extension JSONEncoder {
-    static let claudex: JSONEncoder = {
-        let encoder = JSONEncoder()
-        encoder.dateEncodingStrategy = .custom { date, container in
-            var single = container.singleValueContainer()
-            try single.encode(ISO8601.string(from: date))
-        }
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        return encoder
-    }()
-}
-
-extension JSONDecoder {
-    static let claudex: JSONDecoder = {
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .custom { container in
-            let single = try container.singleValueContainer()
-            if let text = try? single.decode(String.self), let date = ISO8601.date(from: text) {
-                return date
-            }
-            if let seconds = try? single.decode(Double.self) {
-                return Date(timeIntervalSince1970: seconds)
-            }
-            throw ClaudexError.decoding("unparseable date")
-        }
-        return decoder
-    }()
-}
-
-/// The providers are inconsistent about fractional seconds and offset format, so parsing is
-/// attempted with several configurations rather than assuming one.
+/// Timestamps may or may not carry fractional seconds, so both forms are accepted.
 enum ISO8601 {
     private static let withFractional: ISO8601DateFormatter = {
         let formatter = ISO8601DateFormatter()
@@ -53,8 +23,8 @@ enum ISO8601 {
     }
 }
 
-/// Lenient reader over a decoded JSON dictionary. Provider responses are undocumented, so
-/// every lookup is allowed to miss and the caller decides what a miss means.
+/// Lenient reader over decoded JSON. tokenmaxx's status output is not a documented contract,
+/// so every lookup is allowed to miss and the caller decides what a miss means.
 struct JSONView {
     let raw: Any?
 

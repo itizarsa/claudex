@@ -2,164 +2,41 @@ import AppKit
 import ClaudexCore
 import Observation
 
-/// Shared state and intents for both popover and menu-bar icon. Views draw values and forward
-/// gestures; switching, sign-in, notices, and busy-state transitions live here once.
+/// Shared state and intents for both popover and menu-bar icon.
 @MainActor
 @Observable
 final class PanelState {
     struct StatusEntry {
         let kind: ProviderKind
-        let account: Account?
-        let snapshot: UsageSnapshot?
+        let account: UsageAccount?
     }
 
-    private let store: AccountStore
     let engine: UsageEngine
-    private let selector: any AccountSelecting
-    private let login: any AccountSigningIn
-    let routing: RoutingController
-
-    var notice: String?
-    var switchingAccount: UUID?
     var showingSettings = false
-    var signingIn: ProviderKind?
 
-    init(
-        store: AccountStore,
-        engine: UsageEngine,
-        selector: any AccountSelecting,
-        login: any AccountSigningIn,
-        routing: RoutingController
-    ) {
-        self.store = store
+    init(engine: UsageEngine) {
         self.engine = engine
-        self.selector = selector
-        self.login = login
-        self.routing = routing
     }
 
-    var settings: ClaudexCore.Settings { store.settings }
-    var isBusy: Bool { signingIn != nil }
+    var notice: String? { engine.lastError }
 
-    func accounts(for kind: ProviderKind) -> [Account] {
-        store.accounts(for: kind).sorted { lhs, rhs in
-            let left = store.isActive(lhs)
-            let right = store.isActive(rhs)
-            if left != right { return left }
-            return lhs.order < rhs.order
-        }
+    /// The active account first, because it is the reading a person opens the panel for.
+    func accounts(for kind: ProviderKind) -> [UsageAccount] {
+        engine.accounts
+            .filter { $0.provider == kind }
+            .sorted { $0.isActive && !$1.isActive }
     }
-
-    func accountState(_ account: Account) -> AccountState { store.state(account.id) }
-    func isActive(_ account: Account) -> Bool { store.isActive(account) }
-    func isPolling(_ account: Account) -> Bool { engine.isPolling(account.id) }
 
     var statusEntries: [StatusEntry] {
         ProviderKind.allCases.compactMap { kind in
-            let accounts = store.accounts(for: kind)
+            let accounts = accounts(for: kind)
             guard !accounts.isEmpty else { return nil }
-            let account = store.activeAccount(for: kind) ?? accounts.first
-            return StatusEntry(
-                kind: kind,
-                account: account,
-                snapshot: account.flatMap { store.state($0.id).snapshot }
-            )
+            return StatusEntry(kind: kind, account: accounts.first)
         }
     }
 
-    func setAlias(_ raw: String, for account: Account) { store.setAlias(raw, for: account) }
-    func remove(_ account: Account) { store.remove(account) }
-
-    func refresh() {
-        notice = nil
-        engine.refreshAll()
-    }
-
-    func toggleSettings() {
-        notice = nil
-        showingSettings.toggle()
-    }
-
+    func refresh() { engine.refresh() }
+    func toggleSettings() { showingSettings.toggle() }
     func closeSettings() { showingSettings = false }
-
-    func updateSetting<Value>(_ keyPath: WritableKeyPath<ClaudexCore.Settings, Value>, _ value: Value) {
-        store.settings[keyPath: keyPath] = value
-        store.settings.save()
-    }
-
-    func updateThreshold(
-        _ kind: ProviderKind,
-        _ keyPath: WritableKeyPath<ProviderThresholds, Double>,
-        _ value: Double
-    ) {
-        var thresholds = store.settings.thresholds(for: kind)
-        thresholds[keyPath: keyPath] = value
-        store.settings.thresholds[kind] = thresholds
-    }
-
-    func saveSettings() { store.settings.save() }
-
-    func select(_ account: Account) {
-        guard !store.isActive(account), switchingAccount == nil else { return }
-        switchingAccount = account.id
-        notice = nil
-        Task {
-            defer { switchingAccount = nil }
-            do {
-                _ = try await selector.select(account)
-                engine.rotator.noteManualSwitch(account.provider)
-                engine.refreshAll()
-            } catch {
-                notice = ErrorPresenter.message(error)
-            }
-        }
-    }
-
-    func signIn(_ kind: ProviderKind) {
-        guard !isBusy else { return }
-        signingIn = kind
-        notice = "Finish the sign-in in your browser. Claudex is waiting for it."
-        Task {
-            defer { signingIn = nil }
-            do {
-                let result = try await login.run(kind)
-                Log.write("panel: sign-in returned \(result.account.label), already known \(result.wasAlreadyKnown)")
-                notice = result.wasAlreadyKnown
-                    ? "\(result.account.label) was already tracked. Its credentials are up to date."
-                    : "Added \(result.account.label). It is not active — switch to it when you want it."
-                engine.refreshAll()
-            } catch {
-                Log.write("panel: sign-in failed — \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")
-                notice = ErrorPresenter.message(error)
-            }
-        }
-    }
-
-    /// Routing is the one setting that edits files outside claudex, so the panel reads the
-    /// files again whenever it is opened rather than trusting what it last wrote.
-    func refreshRouting() { routing.refresh() }
-
-    func routingEnabled(_ kind: ProviderKind) -> Bool {
-        settings.routedProviders.contains(kind)
-    }
-
-    func setRouting(_ kind: ProviderKind, enabled: Bool) {
-        notice = nil
-        if enabled {
-            store.settings.routedProviders.insert(kind)
-        } else {
-            store.settings.routedProviders.remove(kind)
-        }
-        store.settings.save()
-        Task {
-            if enabled {
-                await routing.enable(kind)
-            } else {
-                await routing.disable(kind)
-            }
-            if case .failed(let message) = routing.state(for: kind) { notice = message }
-        }
-    }
-
     func quit() { NSApplication.shared.terminate(nil) }
 }

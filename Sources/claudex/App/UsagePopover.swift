@@ -35,9 +35,6 @@ struct UsagePopover: View {
     // MARK: - Sections
 
     private func section(_ kind: ProviderKind) -> some View {
-        // The live account sits at the top, because it is the one reading a person opens the
-        // panel for; the rest keep their stored order under it. Sorted here rather than in the
-        // store, where `order` is the rotation order and must not move when the CLI switches.
         let accounts = state.accounts(for: kind)
 
         return VStack(alignment: .leading, spacing: 7) {
@@ -48,43 +45,18 @@ struct UsagePopover: View {
                     .tracking(0.6)
                     .foregroundStyle(Theme.secondaryText)
                 Spacer()
-                IconButton(
-                    systemName: "plus",
-                    help: "Add a \(kind.displayName) account by signing in to it in your browser",
-                    size: 26,
-                    glyphSize: 11
-                ) {
-                    state.signIn(kind)
-                }
-                .disabled(state.isBusy)
             }
             .padding(.leading, 2)
 
             if accounts.isEmpty {
-                EmptyProviderCard(kind: kind, busy: state.signingIn == kind, onSignIn: { state.signIn(kind) })
+                EmptyProviderCard(kind: kind)
             } else {
                 VStack(spacing: 6) {
                     ForEach(accounts) { account in
-                        AccountCard(
-                            account: account,
-                            state: state.accountState(account),
-                            isActive: state.isActive(account),
-                            showsActiveMark: accounts.count > 1,
-                            isRefreshing: state.isPolling(account),
-                            isSwitching: state.switchingAccount == account.id,
-                            canSwitch: accounts.count > 1 && state.switchingAccount == nil,
-                            onAliasChange: { state.setAlias($0, for: account) },
-                            onActivate: { state.select(account) }
-                        )
-                        .contextMenu {
-                            if !state.isActive(account) {
-                                Button("Route the CLI through \(account.label)") { state.select(account) }
-                            }
-                            Button("Remove \(account.label)", role: .destructive) { state.remove(account) }
-                        }
+                        AccountCard(account: account, showsActiveMark: accounts.count > 1)
                     }
                 }
-                .animation(Theme.transition, value: accounts.first(where: { state.isActive($0) })?.id)
+                .animation(Theme.transition, value: accounts.first?.id)
             }
         }
     }
@@ -99,7 +71,7 @@ struct UsagePopover: View {
                 Spacer()
                 IconButton(
                     systemName: "gearshape",
-                    help: state.showingSettings ? "Back to accounts" : "Thresholds, notifications, startup"
+                    help: state.showingSettings ? "Back to accounts" : "Settings"
                 ) {
                     state.toggleSettings()
                 }
@@ -116,30 +88,15 @@ struct UsagePopover: View {
 /// One account is one elevated surface. Grouping the two windows inside a card is what makes
 /// a multi-account panel scannable: the eye lands on a block, not on a run of hairlines.
 struct AccountCard: View {
-    let account: Account
-    let state: AccountState
-    let isActive: Bool
-    /// False for the only account of a provider: with nothing to switch to, marking one card
-    /// as the live one says nothing.
+    let account: UsageAccount
+    /// False for the only account of a provider, where marking the active one says nothing.
     let showsActiveMark: Bool
-    let isRefreshing: Bool
-    let isSwitching: Bool
-    /// False for the only account of a provider, where there is nothing to switch to, and while
-    /// another switch is already running.
-    let canSwitch: Bool
-    let onAliasChange: (String) -> Void
-    let onActivate: () -> Void
-    @State private var hovering = false
-    @State private var editingAlias = false
-    @State private var aliasDraft = ""
-    @FocusState private var aliasFocused: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             header
 
-            switch state {
-            case .ok(let snapshot):
+            if let snapshot = account.snapshot {
                 WindowRow(
                     label: "Session",
                     window: snapshot.fiveHour,
@@ -152,11 +109,14 @@ struct AccountCard: View {
                     emphasis: false,
                     unavailableResetText: nil
                 )
-            case .loading, .idle:
-                SkeletonRow()
-                SkeletonRow()
-            case .failed(let message):
-                Text(ErrorPresenter.message(message))
+            } else {
+                Text("No usage reported yet.")
+                    .font(Theme.caption)
+                    .foregroundStyle(Theme.secondaryText)
+            }
+
+            if account.health != "ready" {
+                Text("tokenmaxx reports this account as \(account.health).")
                     .font(Theme.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -165,125 +125,43 @@ struct AccountCard: View {
         .padding(.horizontal, Theme.cardPaddingH)
         .padding(.vertical, Theme.cardPaddingV)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        // The card is the target: a row that already says which account it is, is a better
-        // place to click than a button repeating the name. Only an inactive one is clickable,
-        // so the active card does not invite a switch to where the CLI already is.
-        .onTapGesture { if isSwitchable { onActivate() } }
-        .help(isSwitchable ? "Sign the \(account.provider.displayName) CLI into \(account.label)" : "")
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(hovering ? Theme.cardHover : Theme.card)
+                .fill(Theme.card)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(Theme.cardStroke, lineWidth: Theme.cardStrokeWidth)
         )
-        // The live account is marked at the card's edge rather than by a tag in the header.
-        // A rail is read as a property of the whole card, which is what being signed in is,
-        // and it leaves the header's one tag slot free for the switch.
+        // The active account is marked at the card's edge: a rail reads as a property of the
+        // whole card.
         .overlay(alignment: .leading) {
-            if showsActiveMark && isActive {
+            if showsActiveMark && account.isActive {
                 Rectangle()
                     .fill(Theme.accent)
                     .frame(width: Theme.activeRailWidth)
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        // Every account is drawn at full strength: the rail says which one is live, and
-        // dimming the others made a two-account panel look half broken. A poll in flight dims
-        // the card it is updating, which is cheaper to look at than a teardown.
-        .opacity(isRefreshing || isSwitching ? 0.62 : 1)
-        .onHover { hovering = $0 }
-        .animation(Theme.transition, value: hovering)
-        .animation(Theme.transition, value: isRefreshing)
-        .animation(Theme.transition, value: isSwitching)
-        .animation(Theme.transition, value: state)
+        .animation(Theme.transition, value: account)
     }
-
-    private var isSwitchable: Bool { canSwitch && !isActive && !isSwitching }
 
     private var header: some View {
         HStack(spacing: 8) {
-            aliasControl
-            // Two lines rather than one run of text: the person names the seat, and the plan
-            // and email below are the fine print saying which seat it is. On one line they
-            // competed for the same weight.
+            AliasBadge(text: account.badge, filled: account.isActive)
             VStack(alignment: .leading, spacing: 1) {
-                HStack(spacing: 4) {
-                    Text(account.label)
-                        .font(Theme.accountName)
-                        .foregroundStyle(Theme.primaryText)
-                        .lineLimit(1)
-                        .layoutPriority(1)
-                    // The organisation trails the name rather than leading it, so every card's
-                    // name starts at the same place and the column scans as a list of people.
-                    // It also truncates first: a clipped organisation still says which seat
-                    // this is, a clipped name does not.
-                    if let organization = account.identity.organizationTag {
-                        Chip(text: organization)
-                    }
-                }
-                Text(subtitle)
+                Text(account.email)
+                    .font(Theme.accountName)
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Text(account.plan)
                     .font(Theme.caption)
                     .foregroundStyle(Theme.tertiaryText)
                     .lineLimit(1)
-                    .truncationMode(.middle)
             }
             Spacer(minLength: 4)
-            // Which account is live is said by the rail down the card's edge, not by a tag, so
-            // this slot never holds two labels at once. What is left is the one thing that is
-            // an action: switching, in progress or on offer.
-            if isSwitching {
-                Tag(text: "Switching…")
-            } else if isSwitchable && hovering {
-                Tag(text: "Switch")
-            }
         }
-    }
-
-    private var subtitle: String {
-        let email = account.identity.email
-        return email.isEmpty ? account.identity.plan : "\(account.identity.plan) · \(email)"
-    }
-
-    /// The badge is the only place the menu-bar alias is visible, so it is also where it is
-    /// edited. Editing in place avoids a settings window for a two-character field.
-    @ViewBuilder private var aliasControl: some View {
-        if editingAlias {
-            TextField("", text: $aliasDraft)
-                .textFieldStyle(.plain)
-                .font(Theme.alias)
-                .multilineTextAlignment(.center)
-                .foregroundStyle(Theme.accent)
-                .focused($aliasFocused)
-                .frame(width: Theme.aliasBadgeSize, height: Theme.aliasBadgeSize)
-                .background(Circle().fill(Theme.accent.opacity(0.15)))
-                .overlay(Circle().strokeBorder(Theme.accent.opacity(0.5), lineWidth: 1))
-                .onChange(of: aliasDraft) { _, new in
-                    if new.count > 2 { aliasDraft = String(new.prefix(2)) }
-                }
-                .onSubmit(commitAlias)
-                .onExitCommand { editingAlias = false }
-                .onChange(of: aliasFocused) { _, focused in
-                    if !focused { commitAlias() }
-                }
-        } else {
-            Button {
-                aliasDraft = account.alias ?? ""
-                editingAlias = true
-                aliasFocused = true
-            } label: {
-                AliasBadge(text: account.badge, filled: isActive)
-            }
-            .buttonStyle(PressableButtonStyle())
-            .help("Set the two-character alias the menu bar ring shows")
-        }
-    }
-
-    private func commitAlias() {
-        editingAlias = false
-        onAliasChange(aliasDraft)
     }
 }
 
@@ -299,40 +177,6 @@ struct AliasBadge: View {
             .background(
                 Circle().fill(filled ? Theme.accent.opacity(0.15) : Color.primary.opacity(0.06))
             )
-    }
-}
-
-/// The organisation beside an account's name. Deliberately unlike `Tag`: greyed and square
-/// where the tag is accented and capsuled, because one is a fact about the seat and the other
-/// is an action offered on it.
-struct Chip: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(Theme.chip)
-            .foregroundStyle(Theme.secondaryText)
-            .lineLimit(1)
-            .truncationMode(.tail)
-            .padding(.horizontal, 4)
-            .padding(.vertical, 1)
-            .background(
-                RoundedRectangle(cornerRadius: 3, style: .continuous)
-                    .fill(Color.primary.opacity(0.07))
-            )
-    }
-}
-
-struct Tag: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(Theme.activeTag)
-            .foregroundStyle(Theme.accent)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(Theme.accent.opacity(0.12)))
     }
 }
 
@@ -449,34 +293,17 @@ struct SkeletonRow: View {
 /// An empty provider is a setup step, not a blank space.
 struct EmptyProviderCard: View {
     let kind: ProviderKind
-    let busy: Bool
-    let onSignIn: () -> Void
-    @State private var hovering = false
 
     var body: some View {
-        // One quiet row, the height of a control rather than of a card: the absence should not
-        // take up more room than the account that replaces it, and a dashed outline of a card
-        // that isn't there reads as damage. Plain words plus a plus, centred.
-        HStack(spacing: 6) {
-            Image(systemName: busy ? "ellipsis" : "plus")
-                .font(.system(size: 9, weight: .bold))
-            Text(busy ? "Signing in…" : "Sign in to \(kind.displayName)")
-                .font(Theme.accountName)
-        }
-        .foregroundStyle(hovering ? Theme.primaryText : Theme.secondaryText)
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 9)
-        .contentShape(Rectangle())
-        .onTapGesture { if !busy { onSignIn() } }
-        .help("Sign in to a \(kind.displayName) account in your browser")
-        .background(
-            RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                .fill(hovering ? Theme.cardHover : Color.primary.opacity(0.03))
-        )
-        .opacity(busy ? 0.62 : 1)
-        .onHover { hovering = $0 && !busy }
-        .animation(Theme.transition, value: hovering)
-        .animation(Theme.transition, value: busy)
+        Text("Run tokenmaxx login \(kind.rawValue) to add an account.")
+            .font(Theme.caption)
+            .foregroundStyle(Theme.secondaryText)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 9)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                    .fill(Color.primary.opacity(0.03))
+            )
     }
 }
 

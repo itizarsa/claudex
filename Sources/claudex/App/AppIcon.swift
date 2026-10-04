@@ -73,7 +73,7 @@ enum AppIcon {
               let bitmap = NSBitmapImageRep(data: tiff),
               let data = bitmap.representation(using: .png, properties: [:])
         else {
-            throw ClaudexError.unsupportedAccount("Could not encode the icon as PNG")
+            throw ClaudexError.decoding("could not encode the icon as PNG")
         }
         try data.write(to: URL(fileURLWithPath: path))
     }

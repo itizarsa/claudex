@@ -2,72 +2,44 @@ import AppKit
 import Foundation
 import Observation
 
-/// Owns polling admission, failure backoff, and publishing readings into account state.
-/// Credential ownership and refresh rules live behind `UsageReader.reading(for:)`.
+/// Reads `tokenmaxx status` on a timer and on wake. The command reads tokenmaxx's local
+/// store, so polling it often costs no provider requests.
 @MainActor
 @Observable
 public final class UsageEngine {
-    private let store: AccountStore
-    private let activity: LocalUsageActivity
-    private let reader: UsageReader
-    let notifier: Notifier
-    public let rotator: Rotator
+    public private(set) var accounts: [UsageAccount] = []
+    public private(set) var lastError: String?
+    public private(set) var isLoading = false
+
     private var timer: Timer?
     private var wakeObserver: NSObjectProtocol?
-    private var isRunning = false
-    private var scheduler = UsagePollScheduler()
-    private var failureCount: [UUID: Int] = [:]
-    private var inFlight: Set<UUID> = []
+    private let interval: TimeInterval = 60
 
-    private let maxBackoff: TimeInterval = 15 * 60
-
-    public var lastError: String?
-
-    public init(
-        store: AccountStore,
-        activity: LocalUsageActivity,
-        reader: UsageReader,
-        notifier: Notifier,
-        rotator: Rotator
-    ) {
-        self.store = store
-        self.activity = activity
-        self.reader = reader
-        self.notifier = notifier
-        self.rotator = rotator
+    /// Accounts can be seeded so a render probe can draw without starting the timer.
+    public init(accounts: [UsageAccount] = []) {
+        self.accounts = accounts
     }
-
-    // MARK: - Lifecycle
 
     public func start() {
         stop()
-        isRunning = true
-        let now = Date()
-        scheduler.start(accounts: pollCandidates, activity: activityDates, now: now)
-        let timer = Timer(timeInterval: 15, repeats: true) { [weak self] _ in
-            Task { @MainActor in self?.tick() }
+        let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
+            Task { @MainActor in await self?.load() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
-
-        notifier.prepare()
 
         wakeObserver = NotificationCenter.default.addObserver(
             forName: NSWorkspace.didWakeNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            Task { @MainActor in
-                // Wake checks new activity but keeps request floors and provider backoff intact.
-                self?.tick()
-            }
+            Task { @MainActor in await self?.load() }
         }
 
-        tick()
+        Task { await load() }
     }
 
     public func stop() {
-        isRunning = false
         timer?.invalidate()
         timer = nil
         if let wakeObserver {
@@ -76,94 +48,28 @@ public final class UsageEngine {
         }
     }
 
-    /// Whether a poll is in flight, so the panel can dim a card rather than tear it down.
-    public func isPolling(_ id: UUID) -> Bool { inFlight.contains(id) }
-
-    /// Request fresh readings. Admission still respects each account's hard floor and backoff.
-    public func refreshAll() {
-        scheduler.requestRefresh(store.accounts.filter(\.enabled).map(\.id))
-        tick()
-    }
-
-    // MARK: - Scheduling
-
-    private func tick() {
-        guard isRunning else { return }
-        let now = Date()
-        let candidates = pollCandidates
-        scheduler.reconcile(accounts: candidates, activity: activityDates, now: now)
-        guard inFlight.isEmpty,
-              let candidate = scheduler.nextDueAccount(from: candidates, now: now),
-              let account = store.account(candidate.id)
-        else { return }
-
-        scheduler.didStart(candidate, at: now)
-        inFlight.insert(account.id)
-        Task { await poll(account, candidate: candidate) }
-    }
-
-    private func poll(_ account: Account, candidate: UsagePollCandidate) async {
-        defer {
-            inFlight.remove(account.id)
-            tick()
-        }
-        // A skeleton is only honest when there is nothing to show yet. Replacing a live reading
-        // or a visible error with one on every refresh makes the panel flicker and resize.
-        if case .idle = store.state(account.id) {
-            store.states[account.id] = .loading
-        }
-
-        do {
-            let snapshot = try await reader.reading(for: account)
-            store.states[account.id] = .ok(snapshot)
-            store.cacheSnapshots()
-            failureCount[account.id] = nil
-            scheduler.didSucceed(candidate)
-
-            // Rotation is evaluated off the active account's reading, because that is the only
-            // account whose usage can put the CLI over budget. Inactive readings matter only as
-            // candidates, and the rotator reads those from the store itself.
-            if store.isActive(account) {
-                await rotator.evaluate(account.provider)
+    /// Has tokenmaxx re-probe every account, then reads the result.
+    public func refresh() {
+        Task {
+            do {
+                try await Tokenmaxx.refresh()
+            } catch {
+                lastError = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
             }
+            await load()
+        }
+    }
+
+    public func load() async {
+        guard !isLoading else { return }
+        isLoading = true
+        defer { isLoading = false }
+        do {
+            accounts = try await Tokenmaxx.status()
+            lastError = nil
         } catch {
-            handle(error, for: account, candidate: candidate)
+            // Keep the last accounts on screen; a stale reading beats an empty panel.
+            lastError = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
         }
-    }
-
-    private var activityDates: [ProviderKind: Date] {
-        Dictionary(uniqueKeysWithValues: ProviderKind.allCases.compactMap { provider in
-            activity.latestModificationDate(for: provider).map { (provider, $0) }
-        })
-    }
-
-    private var pollCandidates: [UsagePollCandidate] {
-        store.accounts.filter(\.enabled).map { account in
-            let active = store.isActive(account)
-            return UsagePollCandidate(
-                id: account.id,
-                provider: account.provider,
-                isActive: active,
-                order: account.order,
-                configuredInterval: active
-                    ? store.settings.activePollSeconds
-                    : store.settings.idlePollSeconds
-            )
-        }
-    }
-
-    private func handle(_ error: Error, for account: Account, candidate: UsagePollCandidate) {
-        let count = (failureCount[account.id] ?? 0) + 1
-        failureCount[account.id] = count
-        let message = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
-        lastError = message
-        store.states[account.id] = UsageFailurePolicy.state(after: error, current: store.state(account.id))
-
-        let retryable = (error as? ClaudexError)?.isRetryable ?? true
-        let base = max(UsagePollScheduler.minimumInterval, candidate.configuredInterval)
-        let delay = retryable
-            ? min(maxBackoff, base * pow(2, Double(count)))
-            : maxBackoff
-        scheduler.didFail(candidate, retryAt: Date().addingTimeInterval(delay))
     }
 }

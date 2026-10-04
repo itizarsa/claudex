@@ -23,36 +23,34 @@ extension Probe {
     }
 
     /// Renders the panel itself to a PNG, so its layout can be looked at without opening it.
-    /// Draws the real view against the real store, which is the only way the image and the app
+    /// Draws the real view against tokenmaxx's real status, which is the only way the image and the app
     /// cannot disagree.
     @MainActor
-    static func renderPanel(path: String) {
-        let providers = ProviderRegistry.live()
-        let store = AccountStore(credentialStore: KeychainCredentialStore())
-        let selector = AccountSelector(store: store)
-        let login = SandboxedLogin(store: store, providers: providers, selector: selector)
-        let reader = UsageReader(store: store, providers: providers)
-        let notifier = Notifier()
-        let rotator = Rotator(store: store, notifier: notifier, selector: selector)
-        let engine = UsageEngine(
-            store: store,
-            activity: LocalUsageActivity(),
-            reader: reader,
-            notifier: notifier,
-            rotator: rotator
-        )
-        // Screenshot rendering must not reach the real CLI config files, so the installer is
-        // pointed at a throwaway directory that nothing ever reads back.
-        let scratch = URL(fileURLWithPath: NSTemporaryDirectory()).appending(path: "claudex-probe-\(UUID().uuidString)")
-        let routing = RoutingController(
-            proxy: LoopbackAccountProxy(routing: StaticAccountRouting([:])),
-            installer: NativeCLIRoutingInstaller(
-                claudeSettings: scratch.appending(path: "settings.json"),
-                codexConfig: scratch.appending(path: "config.toml"),
-                backups: scratch.appending(path: "routing.json")
-            )
-        )
-        let state = PanelState(store: store, engine: engine, selector: selector, login: login, routing: routing)
+    /// A fixture, a saved `tokenmaxx status` output, renders mock accounts for documentation.
+    static func renderPanel(path: String, fixture: String? = nil) {
+        if let fixture {
+            do {
+                let accounts = try Tokenmaxx.parse(Data(contentsOf: URL(fileURLWithPath: fixture)))
+                return renderPanel(path: path, state: PanelState(engine: UsageEngine(accounts: accounts)))
+            } catch {
+                print("fixture failed: \(error.localizedDescription)")
+                return
+            }
+        }
+        // This runs on the main thread before the run loop starts, so the read happens off
+        // the main actor and the thread waits for it.
+        let semaphore = DispatchSemaphore(value: 0)
+        nonisolated(unsafe) var accounts: [UsageAccount] = []
+        Task.detached {
+            accounts = (try? await Tokenmaxx.status()) ?? []
+            semaphore.signal()
+        }
+        semaphore.wait()
+        renderPanel(path: path, state: PanelState(engine: UsageEngine(accounts: accounts)))
+    }
+
+    @MainActor
+    private static func renderPanel(path: String, state: PanelState) {
         // AppKit needs its application object before a view can be laid out, and the panel is
         // laid out here on the real main thread rather than on the main queue: under
         // `dispatchMain()` the two are not the same thread.

@@ -4,43 +4,11 @@ import SwiftUI
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
-    private let store: AccountStore
-    private let state: PanelState
-    /// One status item carrying every provider's ring. Active is a per-provider fact — signing a
-    /// Claude account in does not change which Codex account is live — so each provider needs
-    /// its own ring; but one item per provider would be two click targets opening the same
-    /// panel and two things to drag into position, so the rings share an item.
-    private let routing: RoutingController
+    private let state = PanelState(engine: UsageEngine())
+    /// One status item carrying every provider's ring. Each provider has its own active
+    /// account, so each needs its own ring; one item keeps them one click target.
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
-    private var terminationPending = false
-
-    override init() {
-        let providers = ProviderRegistry.live()
-        let store = AccountStore(credentialStore: KeychainCredentialStore())
-        let selector = AccountSelector(store: store)
-        let login = SandboxedLogin(store: store, providers: providers, selector: selector)
-        let reader = UsageReader(store: store, providers: providers)
-        let notifier = Notifier()
-        let rotator = Rotator(store: store, notifier: notifier, selector: selector)
-        let engine = UsageEngine(
-            store: store,
-            activity: LocalUsageActivity(),
-            reader: reader,
-            notifier: notifier,
-            rotator: rotator
-        )
-        // The proxy is constructed but not started. Starting it and editing a CLI config are
-        // the same user action, taken in Settings; launching the app is not consent to either.
-        let routing = RoutingController(
-            proxy: LoopbackAccountProxy(routing: StoreAccountRouting(store: store, providers: providers)),
-            installer: NativeCLIRoutingInstaller.live()
-        )
-        self.store = store
-        self.routing = routing
-        self.state = PanelState(store: store, engine: engine, selector: selector, login: login, routing: routing)
-        super.init()
-    }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem.button?.target = self
@@ -59,23 +27,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         observeStatusIcon()
         state.engine.start()
-
-        // Homebrew and DMG installation only copy the bundle. First app launch starts the local
-        // proxy and writes the provider routing selected in Claudex settings.
-        Task { await routing.configureOnLaunch(enabledProviders: store.settings.routedProviders) }
-    }
-
-    /// Drain in-flight responses before the process goes. Asking AppKit to wait keeps the main
-    /// actor free to run `RoutingController.shutdown`; blocking it with a semaphore would
-    /// deadlock the task that has to signal that semaphore.
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !terminationPending else { return .terminateLater }
-        terminationPending = true
-        Task {
-            await routing.shutdown()
-            sender.reply(toApplicationShouldTerminate: true)
-        }
-        return .terminateLater
     }
 
     @objc private func togglePopover() {
@@ -89,13 +40,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
             // A status item click does not activate an accessory app, and an inactive app's
             // popover window cannot become key — which leaves every control in it inert: the
             // clicks arrive and SwiftUI drops them. Activating first is what makes the buttons
-            // and the alias field work at all.
+            // work at all.
             NSApp.activate(ignoringOtherApps: true)
             popover.show(relativeTo: button.bounds, of: button, preferredEdge: .minY)
             popover.contentViewController?.view.window?.makeKey()
-            // Both config files are the user's to edit; re-reading on open is how the panel
-            // notices they did.
-            state.refreshRouting()
+            Task { await state.engine.load() }
             // The item stays lit for as long as the panel is open, which is what tells you
             // which icon the panel belongs to.
             button.highlight(true)
@@ -116,7 +65,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    /// Redraws one ring per provider that has an account, each from that provider's own active
+    /// Redraws one ring per provider that has an account, each from that provider's active
     /// account, and resizes the item to suit. Before any account exists a single empty ring is
     /// drawn, or the app would have nothing to click.
     private func updateStatusIcon() {
@@ -126,7 +75,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         let entries = statusEntries.map { entry -> MenuBarIcon.Entry in
             return MenuBarIcon.Entry(
                 alias: entry.account?.badge ?? "-",
-                fiveHour: entry.snapshot?.fiveHour ?? .unknown
+                fiveHour: entry.account?.snapshot?.fiveHour ?? .unknown
             )
         }
 
@@ -137,7 +86,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         button.toolTip = statusEntries.isEmpty
             ? "Claudex usage"
             : statusEntries.map { entry in
-                "\(entry.kind.displayName): \(entry.account?.label ?? "no account")"
+                "\(entry.kind.displayName): \(entry.account?.email ?? "no account")"
             }.joined(separator: "\n")
     }
 }
