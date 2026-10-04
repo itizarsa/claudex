@@ -1,0 +1,91 @@
+{
+ "accounts": [
+  {
+   "id": "c1",
+   "provider": "anthropic",
+   "identity": "alex@example.com",
+   "label": "alex@example.com",
+   "plan": "max",
+   "health": "ready",
+   "enabled": true
+  },
+  {
+   "id": "c2",
+   "provider": "anthropic",
+   "identity": "alex@studio.dev",
+   "label": "alex@studio.dev",
+   "plan": "team",
+   "health": "ready",
+   "enabled": true
+  },
+  {
+   "id": "o1",
+   "provider": "openai",
+   "identity": "alex@example.com",
+   "label": "alex@example.com",
+   "plan": "plus",
+   "health": "ready",
+   "enabled": true
+  }
+ ],
+ "providers": [
+  {
+   "provider": "anthropic",
+   "activeAccountId": "c1"
+  },
+  {
+   "provider": "openai",
+   "activeAccountId": "o1"
+  }
+ ],
+ "usage": [
+  {
+   "accountId": "c1",
+   "observedAt": "2026-10-04T10:17:10.000Z",
+   "windows": [
+    {
+     "id": "session",
+     "usedPercent": 46,
+     "resetAt": "2026-10-04T12:47:10.000Z"
+    },
+    {
+     "id": "weekly_all",
+     "usedPercent": 61,
+     "resetAt": "2026-10-07T08:17:10.000Z"
+    }
+   ]
+  },
+  {
+   "accountId": "c2",
+   "observedAt": "2026-10-04T10:17:10.000Z",
+   "windows": [
+    {
+     "id": "session",
+     "usedPercent": 12,
+     "resetAt": "2026-10-04T14:17:10.000Z"
+    },
+    {
+     "id": "weekly_all",
+     "usedPercent": 88,
+     "resetAt": "2026-10-05T16:17:10.000Z"
+    }
+   ]
+  },
+  {
+   "accountId": "o1",
+   "observedAt": "2026-10-04T10:17:10.000Z",
+   "windows": [
+    {
+     "id": "codex:primary",
+     "usedPercent": 23,
+     "resetAt": "2026-10-04T13:17:10.000Z"
+    },
+    {
+     "id": "codex:secondary",
+     "usedPercent": 37,
+     "resetAt": "2026-10-09T10:17:10.000Z"
+    }
+   ]
+  }
+ ]
+}

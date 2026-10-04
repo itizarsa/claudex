@@ -1,19 +1,22 @@
 # Claudex
 
-Claudex is a macOS menu bar app that tracks Claude and Codex subscription
-accounts and routes each CLI request through the selected account.
+Claudex is a macOS menu bar app that shows the 5-hour and weekly limits of your
+Claude and Codex accounts.
 
-It shows 5-hour and weekly usage, keeps credentials in macOS Keychain, and can
-switch accounts before a limit interrupts your work.
+It reads them from [tokenmaxx](https://github.com/RubricLab/tokenmaxx), which owns
+sign-in, credentials and account switching. Claudex only displays.
 
 <p align="center">
-  <img src="docs/screenshots/accounts.png" width="280" alt="Claudex account usage panel with mock Claude and Codex accounts">
-  <img src="docs/screenshots/settings.png" width="280" alt="Claudex rotation, notification, polling, and startup settings">
+  <img src="docs/screenshots/accounts.png" width="280" alt="Claudex usage panel with mock Claude and Codex accounts">
 </p>
 
 ## Install
 
-Requires Apple silicon and macOS 14 Sonoma or newer.
+Requires Apple silicon, macOS 14 Sonoma or newer, and tokenmaxx:
+
+```sh
+bun add -g tokenmaxx
+```
 
 ### Homebrew
 
@@ -66,26 +69,17 @@ they cannot remove this warning.
 
 ## First setup
 
-1. Open Claudex from Applications. It lives in the menu bar, not the Dock.
-   On first launch it configures Claude and Codex to use Claudex's local proxy.
-2. Click its menu bar ring.
-3. Click `+` beside Claude or Codex.
-4. Complete the provider's browser sign-in.
-5. Repeat for every account you want to track.
-6. Open the gear menu to set rotation thresholds and polling intervals.
-
-Claude accounts must be claude.ai subscriptions. Codex accounts must use ChatGPT
-sign-in. API keys are rejected. Multiple accounts may share one email address.
+1. Add accounts with tokenmaxx: `tokenmaxx login claude`, `tokenmaxx login codex`.
+2. Open Claudex from Applications. It lives in the menu bar, not the Dock.
+3. Click its menu bar ring to see every account's limits.
 
 ## Features
 
-- Track 5-hour and weekly limits for Claude and Codex.
-- Keep multiple accounts per provider.
-- Route each provider CLI through another saved account without rewriting its credentials.
-- Rotate automatically when either usage threshold is crossed.
-- Show one menu bar ring per active provider.
-- Store tokens in macOS Keychain.
-- Launch at login and notify after automatic switches.
+- Show 5-hour and weekly limits for every tokenmaxx Claude and Codex account.
+- One menu bar ring per provider, for its active account.
+- Refresh asks tokenmaxx to re-probe usage; otherwise Claudex re-reads
+  `tokenmaxx status` every minute and when the panel opens.
+- Launch at login.
 
 ## Build from source
 
@@ -115,36 +109,18 @@ configured.
 
 ## Diagnostic commands
 
-The bundled binary also works headlessly.
-
 | Flag | Effect |
 | --- | --- |
-| `--probe` | Read both CLIs and print parsed identity and usage. Writes nothing. |
-| `--vault` | Round-trip a throwaway credential through the vault. |
-| `--poll` | Run one poll cycle through the vault and print each step. |
-| `--switch <label>` | Select a tracked account for proxy routing. |
-| `--rotate` | Print the current rotation decision without switching. |
-| `--login <provider>` | Add an account through the provider CLI's browser login. |
-| `--list` | List stored accounts and last known usage. |
+| `--list` | Print every account and its limits as Claudex parsed them from `tokenmaxx status`. |
+| `--panelshot <path> [fixture]` | Render the panel to a PNG, optionally from a saved `tokenmaxx status` JSON. |
 
-`--probe` is the quickest check when a provider changes an undocumented usage
-endpoint.
+Regenerate the README screenshot from mock accounts:
 
-## Data and credentials
-
-Claudex stores metadata and cached usage here:
-
-```text
-~/Library/Application Support/claudex/accounts.json
-~/Library/Application Support/claudex/settings.json
-~/Library/Application Support/claudex/snapshots.json
+```sh
+swift run claudex --panelshot docs/screenshots/accounts.png docs/screenshots/status.fixture.json
 ```
 
-Tokens live in one macOS Keychain item per account. Claudex owns and refreshes
-these vaulted credentials. It reads provider CLI credentials only during import,
-diagnostics, or sandboxed sign-in and never rewrites provider credential stores.
+## Data
 
-## Status
-
-Tracking, switching, automatic rotation, and in-app sign-in are implemented.
-See [PLAN.md](PLAN.md) for design details.
+Claudex stores nothing of its own and never touches credentials. Everything comes from
+`tokenmaxx status`.
