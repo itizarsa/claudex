@@ -1,4 +1,4 @@
-name: Release DMG
+name: Release
 
 on:
   push:
@@ -42,7 +42,7 @@ jobs:
 
           echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
           echo "version=${tag#v}" >> "${GITHUB_OUTPUT}"
-          echo "dmg=build/Claudex-${tag#v}.dmg" >> "${GITHUB_OUTPUT}"
+          echo "zip=build/Claudex-${tag#v}.zip" >> "${GITHUB_OUTPUT}"
 
       - name: Check out tag
         uses: actions/checkout@v6
@@ -52,22 +52,42 @@ jobs:
       - name: Test
         run: make test
 
-      - name: Build DMG
-        run: make dmg VERSION="${{ steps.release.outputs.version }}"
+      # Every release has to carry the same self-signed identity, or macOS treats an update
+      # as a different app and drops its Launch at login.
+      - name: Import signing certificate
+        shell: bash
+        env:
+          P12_BASE64: ${{ secrets.CODESIGN_P12_BASE64 }}
+          P12_PASSWORD: ${{ secrets.CODESIGN_P12_PASSWORD }}
+        run: |
+          keychain="${RUNNER_TEMP}/codesign.keychain-db"
+          keychain_password="$(openssl rand -base64 24)"
+          echo "${P12_BASE64}" | base64 --decode > "${RUNNER_TEMP}/codesign.p12"
+          security create-keychain -p "${keychain_password}" "${keychain}"
+          security set-keychain-settings -lut 3600 "${keychain}"
+          security unlock-keychain -p "${keychain_password}" "${keychain}"
+          security import "${RUNNER_TEMP}/codesign.p12" -k "${keychain}" -P "${P12_PASSWORD}" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple: -s -k "${keychain_password}" "${keychain}" >/dev/null
+          security list-keychains -d user -s "${keychain}" $(security list-keychains -d user | tr -d '"')
+          rm "${RUNNER_TEMP}/codesign.p12"
+
+      - name: Build zip
+        run: make zip VERSION="${{ steps.release.outputs.version }}" SIGN_IDENTITY=claudex-codesign
 
       - name: Publish GitHub Release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.release.outputs.tag }}
-          DMG: ${{ steps.release.outputs.dmg }}
+          ZIP: ${{ steps.release.outputs.zip }}
         run: |
           if gh release view "${TAG}" --repo "${GITHUB_REPOSITORY}" >/dev/null 2>&1; then
-            gh release upload "${TAG}" "${DMG}" --clobber --repo "${GITHUB_REPOSITORY}"
+            gh release upload "${TAG}" "${ZIP}" --clobber --repo "${GITHUB_REPOSITORY}"
           else
-            gh release create "${TAG}" "${DMG}" \
+            gh release create "${TAG}" "${ZIP}" \
               --repo "${GITHUB_REPOSITORY}" \
               --verify-tag \
               --generate-notes \
               --title "${TAG}"
           fi
+

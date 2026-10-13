@@ -33,7 +33,7 @@ Then open Claudex from Applications.
 
 ### mise
 
-Add Claudex to `mise.toml`:
+mise installs the same Homebrew cask. Add Claudex to `mise.toml`:
 
 ```toml
 [bootstrap.packages]
@@ -46,14 +46,12 @@ Install it:
 mise bootstrap packages apply --manager brew-cask
 ```
 
-### DMG
-
-[Download latest release](https://github.com/itizarsa/claudex/releases/latest), open
-the DMG, then drag Claudex into Applications.
-
 ### First launch warning
 
-Claudex 0.1.0 is ad-hoc signed and not notarized. macOS may show:
+Claudex is self-signed, not notarized. The Homebrew cask clears its quarantine flag,
+so Homebrew and mise installs open without a prompt.
+
+A zip downloaded in a browser is quarantined, and macOS shows:
 
 > Apple could not verify "Claudex.app" is free of malware.
 
@@ -64,8 +62,7 @@ To open it once:
 3. Go to Privacy & Security.
 4. Find the Claudex message and click Open Anyway.
 
-Do not disable Gatekeeper globally. Homebrew and mise install the same DMG, so
-they cannot remove this warning.
+Do not disable Gatekeeper globally.
 
 ## First setup
 
@@ -87,7 +84,7 @@ Requires Xcode Command Line Tools. Full Xcode is not needed.
 
 ```sh
 make bundle     # build/Claudex.app
-make dmg        # build/Claudex-0.1.0.dmg
+make zip        # build/Claudex-0.1.0.zip
 make install    # copy to /Applications and launch
 make run        # rebuild and launch
 ```
@@ -101,11 +98,14 @@ git tag -a v0.1.1 -m "v0.1.1"
 git push origin v0.1.1
 ```
 
-GitHub Actions runs tests, builds the versioned DMG, and attaches it to a GitHub
-Release. The workflow also supports manual runs for an existing tag.
+GitHub Actions runs tests, builds the versioned zip, and attaches it to a GitHub
+Release for the Homebrew cask. The workflow also supports manual runs for an existing tag.
 
-Builds remain ad-hoc signed until Developer ID signing and Apple notarization are
-configured.
+Releases are signed with the self-signed `claudex-codesign` certificate, read from the
+`CODESIGN_P12_BASE64` and `CODESIGN_P12_PASSWORD` repository secrets. Every release must
+use the same certificate, or macOS treats the update as a different app and drops Launch
+at login. Local builds use the certificate when it is in your keychain and fall back to
+ad-hoc otherwise.
 
 ## Diagnostic commands
 
