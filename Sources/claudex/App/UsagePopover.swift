@@ -53,7 +53,11 @@ struct UsagePopover: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(accounts) { account in
-                        AccountCard(account: account, showsActiveMark: accounts.count > 1) {
+                        AccountCard(
+                            account: account,
+                            showsActiveMark: accounts.count > 1,
+                            isSwitching: state.engine.switchingAccount == account.id
+                        ) {
                             state.switchTo(account)
                         }
                     }
@@ -93,7 +97,11 @@ struct AccountCard: View {
     let account: UsageAccount
     /// False for the only account of a provider, where marking the active one says nothing.
     let showsActiveMark: Bool
+    let isSwitching: Bool
     let onSwitch: () -> Void
+    @State private var hovering = false
+
+    private var isSwitchable: Bool { showsActiveMark && !account.isActive && !isSwitching }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -128,9 +136,12 @@ struct AccountCard: View {
         .padding(.horizontal, Theme.cardPaddingH)
         .padding(.vertical, Theme.cardPaddingV)
         .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+        .onTapGesture { if isSwitchable { onSwitch() } }
+        .help(isSwitchable ? "Route \(account.provider.displayName) through this account" : "")
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(Theme.card)
+                .fill(isSwitchable && hovering ? Theme.cardHover : Theme.card)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
@@ -146,6 +157,10 @@ struct AccountCard: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
+        .opacity(isSwitching ? 0.62 : 1)
+        .onHover { hovering = $0 }
+        .animation(Theme.transition, value: hovering)
+        .animation(Theme.transition, value: isSwitching)
         .animation(Theme.transition, value: account)
     }
 
@@ -164,11 +179,25 @@ struct AccountCard: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            if showsActiveMark && !account.isActive {
-                TextButton(title: "Use", action: onSwitch)
-                    .help("Route \(account.provider.displayName) through this account")
+            if isSwitching {
+                Tag(text: "Switching…")
+            } else if isSwitchable && hovering {
+                Tag(text: "Switch")
             }
         }
+    }
+}
+
+struct Tag: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(Theme.activeTag)
+            .foregroundStyle(Theme.accent)
+            .padding(.horizontal, 5)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(Theme.accent.opacity(0.12)))
     }
 }
 

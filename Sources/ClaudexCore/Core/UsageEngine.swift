@@ -10,6 +10,7 @@ public final class UsageEngine {
     public private(set) var accounts: [UsageAccount] = []
     public private(set) var lastError: String?
     public private(set) var isLoading = false
+    public private(set) var switchingAccount: String?
     /// Set when a load is asked for mid-load, so a switch's result isn't lost to an older read.
     private var reloadPending = false
 
@@ -64,7 +65,10 @@ public final class UsageEngine {
 
     /// Has tokenmaxx route `account`'s provider through it, then reads the result.
     public func switchTo(_ account: UsageAccount) {
+        guard switchingAccount == nil else { return }
+        switchingAccount = account.id
         Task {
+            defer { switchingAccount = nil }
             do {
                 try await Tokenmaxx.switchTo(account)
             } catch {
