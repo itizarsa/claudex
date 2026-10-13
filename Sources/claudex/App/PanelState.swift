@@ -36,6 +36,7 @@ final class PanelState {
     }
 
     func refresh() { engine.refresh() }
+    func switchTo(_ account: UsageAccount) { engine.switchTo(account) }
     func toggleSettings() { showingSettings.toggle() }
     func closeSettings() { showingSettings = false }
     func quit() { NSApplication.shared.terminate(nil) }

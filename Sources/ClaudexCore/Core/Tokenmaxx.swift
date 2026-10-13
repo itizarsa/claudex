@@ -1,7 +1,7 @@
 import Foundation
 
 /// One tokenmaxx account with its latest reading. tokenmaxx owns sign-in, credentials and
-/// switching; claudex only draws what `tokenmaxx status` reports.
+/// switching; claudex draws what its daemon reports and asks it to switch.
 public struct UsageAccount: Identifiable, Equatable, Sendable {
     public let id: String
     public let provider: ProviderKind
@@ -17,32 +17,44 @@ public struct UsageAccount: Identifiable, Equatable, Sendable {
 }
 
 public enum Tokenmaxx {
-    /// A GUI app inherits launchd's minimal PATH, which holds neither tokenmaxx nor the `bun`
-    /// its shebang asks for. These are where the usual installers put them.
-    private static let searchPath = [
-        "\(NSHomeDirectory())/.bun/bin",
-        "\(NSHomeDirectory())/.local/share/mise/shims",
-        "/opt/homebrew/bin",
-        "/usr/local/bin",
-        "/usr/bin",
-        "/bin",
-    ]
-
-    private static let timeout: TimeInterval = 20
+    /// The tokenmaxx daemon's JSON-RPC socket, the same one tokenmaxx's own app reads. Talking
+    /// to it directly spares a GUI app from finding `tokenmaxx`, `node` and `bun` on launchd's
+    /// minimal PATH.
+    private static var socketPath: String {
+        let home = ProcessInfo.processInfo.environment["TOKENMAXX_HOME"]
+            ?? "\(NSHomeDirectory())/.tokenmaxx"
+        return "\(home)/runtime/manager.sock"
+    }
 
     public static func status() async throws -> [UsageAccount] {
-        try parse(try await run(["status"]))
+        let snapshot = try await call("dashboard/analytics", timeout: 15)["snapshot"]
+        guard snapshot["accounts"].exists else { throw ClaudexError.decoding("no accounts field") }
+        return parse(snapshot)
     }
 
     /// Asks tokenmaxx to re-probe every account's usage before the next `status`.
     public static func refresh() async throws {
-        _ = try await run(["refresh"])
+        _ = try await call("usage/refresh", timeout: 60)
     }
 
+    /// Makes `account` the one tokenmaxx routes its provider's requests through.
+    public static func switchTo(_ account: UsageAccount) async throws {
+        let params: [String: Any] = [
+            "provider": account.provider.tokenmaxxName,
+            "reason": "manual",
+            "targetAccountId": account.id,
+        ]
+        _ = try await call("provider/switch", params: params, timeout: 30)
+    }
+
+    /// Parses a saved `tokenmaxx status` output, which has the daemon snapshot's shape.
     public static func parse(_ data: Data) throws -> [UsageAccount] {
         let json = try JSONView.parse(data)
         guard json["accounts"].exists else { throw ClaudexError.decoding("no accounts field") }
+        return parse(json)
+    }
 
+    static func parse(_ json: JSONView) -> [UsageAccount] {
         let active = Set(json["providers"].array.compactMap { $0["activeAccountId"].string })
 
         // `usage` can hold readings for accounts since removed, and more than one per account;
@@ -93,48 +105,64 @@ public enum Tokenmaxx {
     }
 
     /// The blocking work runs off the caller's executor so the main actor stays free.
-    private static func run(_ arguments: [String]) async throws -> Data {
-        try await Task.detached { try runBlocking(arguments) }.value
+    private static func call(_ method: String, params: Any = NSNull(), timeout: Int) async throws -> JSONView {
+        try await Task.detached { try callBlocking(method, params: params, timeout: timeout) }.value
     }
 
-    private static func runBlocking(_ arguments: [String]) throws -> Data {
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
-        process.arguments = ["tokenmaxx"] + arguments
-        var environment = ProcessInfo.processInfo.environment
-        environment["PATH"] = (searchPath + [environment["PATH"] ?? ""]).joined(separator: ":")
-        environment["NO_COLOR"] = "1"
-        process.environment = environment
+    /// One request per connection: a JSON line out, a JSON line back.
+    private static func callBlocking(_ method: String, params: Any, timeout: Int) throws -> JSONView {
+        let fd = socket(AF_UNIX, SOCK_STREAM, 0)
+        guard fd >= 0 else { throw ClaudexError.tokenmaxx("could not open a socket") }
+        defer { close(fd) }
 
-        let output = Pipe()
-        let errors = Pipe()
-        process.standardOutput = output
-        process.standardError = errors
-        process.standardInput = FileHandle.nullDevice
-        try process.run()
+        var limit = timeval(tv_sec: timeout, tv_usec: 0)
+        setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
+        setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &limit, socklen_t(MemoryLayout<timeval>.size))
+        // A daemon that closes the socket mid-write must not kill the app with SIGPIPE.
+        var on: Int32 = 1
+        setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size))
 
-        // Read both pipes while waiting: a child that fills a pipe buffer blocks forever.
-        var outData = Data()
-        var errorData = Data()
-        let group = DispatchGroup()
-        DispatchQueue.global().async(group: group) { outData = output.fileHandleForReading.readDataToEndOfFile() }
-        DispatchQueue.global().async(group: group) { errorData = errors.fileHandleForReading.readDataToEndOfFile() }
-        if group.wait(timeout: .now() + timeout) == .timedOut {
-            process.terminate()
-            throw ClaudexError.tokenmaxx("tokenmaxx \(arguments.joined(separator: " ")) timed out")
+        var address = sockaddr_un()
+        address.sun_family = sa_family_t(AF_UNIX)
+        let path = Array(socketPath.utf8)
+        guard path.count < MemoryLayout.size(ofValue: address.sun_path) else {
+            throw ClaudexError.tokenmaxx("tokenmaxx socket path is too long")
         }
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            // env exits 127 when it cannot find the command.
-            if process.terminationStatus == 127 {
-                throw ClaudexError.tokenmaxx("tokenmaxx not found. Install it with `bun add -g tokenmaxx`.")
+        withUnsafeMutableBytes(of: &address.sun_path) { $0.copyBytes(from: path) }
+        let connected = withUnsafePointer(to: &address) {
+            $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
+                connect(fd, $0, socklen_t(MemoryLayout<sockaddr_un>.size))
             }
-            let detail = String(decoding: errorData, as: UTF8.self)
-                .split(separator: "\n").first.map(String.init) ?? "exit \(process.terminationStatus)"
-            throw ClaudexError.tokenmaxx("tokenmaxx failed: \(detail)")
         }
-        return outData
+        guard connected == 0 else {
+            throw ClaudexError.tokenmaxx("tokenmaxx is not running. Start it with `tokenmaxx daemon start`.")
+        }
+
+        let request: [String: Any] = ["id": 1, "method": method, "params": params]
+        let line = try JSONSerialization.data(withJSONObject: request) + Data("\n".utf8)
+        let sent = line.withUnsafeBytes { write(fd, $0.baseAddress, $0.count) }
+        guard sent == line.count else { throw ClaudexError.tokenmaxx("tokenmaxx \(method) failed to send") }
+
+        var response = Data()
+        var buffer = [UInt8](repeating: 0, count: 64 * 1024)
+        while !response.contains(UInt8(ascii: "\n")) {
+            let count = read(fd, &buffer, buffer.count)
+            if count > 0 {
+                response.append(contentsOf: buffer[..<count])
+            } else if count == 0 {
+                break
+            } else if errno == EAGAIN {
+                throw ClaudexError.tokenmaxx("tokenmaxx \(method) timed out")
+            } else {
+                throw ClaudexError.tokenmaxx("tokenmaxx \(method) failed: \(String(cString: strerror(errno)))")
+            }
+        }
+
+        let json = try JSONView.parse(response)
+        if let message = json["error"]["message"].string {
+            throw ClaudexError.tokenmaxx("tokenmaxx: \(message)")
+        }
+        return json["result"]
     }
 }
 
@@ -145,6 +173,13 @@ extension ProviderKind {
         case "anthropic": self = .claude
         case "openai": self = .codex
         default: return nil
+        }
+    }
+
+    var tokenmaxxName: String {
+        switch self {
+        case .claude: return "anthropic"
+        case .codex: return "openai"
         }
     }
 }

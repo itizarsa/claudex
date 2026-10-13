@@ -53,7 +53,9 @@ struct UsagePopover: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(accounts) { account in
-                        AccountCard(account: account, showsActiveMark: accounts.count > 1)
+                        AccountCard(account: account, showsActiveMark: accounts.count > 1) {
+                            state.switchTo(account)
+                        }
                     }
                 }
                 .animation(Theme.transition, value: accounts.first?.id)
@@ -91,6 +93,7 @@ struct AccountCard: View {
     let account: UsageAccount
     /// False for the only account of a provider, where marking the active one says nothing.
     let showsActiveMark: Bool
+    let onSwitch: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -161,6 +164,10 @@ struct AccountCard: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
+            if showsActiveMark && !account.isActive {
+                TextButton(title: "Use", action: onSwitch)
+                    .help("Route \(account.provider.displayName) through this account")
+            }
         }
     }
 }

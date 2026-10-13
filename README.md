@@ -4,7 +4,7 @@ Claudex is a macOS menu bar app that shows the 5-hour and weekly limits of your
 Claude and Codex accounts.
 
 It reads them from [tokenmaxx](https://github.com/RubricLab/tokenmaxx), which owns
-sign-in, credentials and account switching. Claudex only displays.
+sign-in, credentials and account switching. Claudex displays and asks it to switch.
 
 <p align="center">
   <img src="docs/screenshots/accounts.png" width="280" alt="Claudex usage panel with mock Claude and Codex accounts">
@@ -12,10 +12,11 @@ sign-in, credentials and account switching. Claudex only displays.
 
 ## Install
 
-Requires Apple silicon, macOS 14 Sonoma or newer, and tokenmaxx:
+Requires Apple silicon, macOS 14 Sonoma or newer, and tokenmaxx with its daemon running:
 
 ```sh
 bun add -g tokenmaxx
+tokenmaxx daemon install
 ```
 
 ### Homebrew
@@ -74,8 +75,9 @@ Do not disable Gatekeeper globally.
 
 - Show 5-hour and weekly limits for every tokenmaxx Claude and Codex account.
 - One menu bar ring per provider, for its active account.
-- Refresh asks tokenmaxx to re-probe usage; otherwise Claudex re-reads
-  `tokenmaxx status` every minute and when the panel opens.
+- Use switches a provider to another account.
+- Refresh asks tokenmaxx to re-probe usage; otherwise Claudex re-reads the tokenmaxx
+  daemon's snapshot every minute and when the panel opens.
 - Launch at login.
 
 ## Build from source
@@ -111,7 +113,7 @@ ad-hoc otherwise.
 
 | Flag | Effect |
 | --- | --- |
-| `--list` | Print every account and its limits as Claudex parsed them from `tokenmaxx status`. |
+| `--list` | Print every account and its limits as Claudex parsed them from the tokenmaxx daemon. |
 | `--panelshot <path> [fixture]` | Render the panel to a PNG, optionally from a saved `tokenmaxx status` JSON. |
 
 Regenerate the README screenshot from mock accounts:
@@ -123,4 +125,4 @@ swift run claudex --panelshot docs/screenshots/accounts.png docs/screenshots/sta
 ## Data
 
 Claudex stores nothing of its own and never touches credentials. Everything comes from
-`tokenmaxx status`.
+the tokenmaxx daemon's socket, `~/.tokenmaxx/runtime/manager.sock`.
