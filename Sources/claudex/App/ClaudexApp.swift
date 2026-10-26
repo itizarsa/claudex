@@ -7,6 +7,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let state = PanelState(engine: UsageEngine())
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
+    private let relauncher = UpdateRelauncher()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         statusItem.button?.target = self
@@ -25,6 +26,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
 
         observeStatusIcon()
         state.engine.start()
+        relauncher.start()
     }
 
     @objc private func togglePopover() {
