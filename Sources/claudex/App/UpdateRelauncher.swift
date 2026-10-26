@@ -8,26 +8,33 @@ import AppKit
 final class UpdateRelauncher {
     private let bundleURL = Bundle.main.bundleURL
     private let runningBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-    private var timer: Timer?
+    private var source: DispatchSourceFileSystemObject?
 
+    /// Watches the folder holding the bundle. An upgrade removes the old bundle and moves the new
+    /// one in, and both are writes to that folder, so nothing runs until something there changes.
     func start() {
         guard runningBuild != nil else { return }
-        let timer = Timer(timeInterval: 5, repeats: true) { [weak self] _ in
+        let fd = open(bundleURL.deletingLastPathComponent().path, O_EVTONLY)
+        guard fd >= 0 else { return }
+
+        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+        source.setEventHandler { [weak self] in
             MainActor.assumeIsolated { self?.check() }
         }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
+        source.setCancelHandler { close(fd) }
+        source.resume()
+        self.source = source
     }
 
     private func check() {
-        // Mid-upgrade the bundle is briefly missing; wait for the new one to land.
+        // Mid-upgrade the bundle is briefly missing; the next write brings the new one.
         let plist = bundleURL.appendingPathComponent("Contents/Info.plist")
         guard let info = NSDictionary(contentsOf: plist),
               let build = info["CFBundleVersion"] as? String,
               build != runningBuild
         else { return }
 
-        timer?.invalidate()
+        source?.cancel()
         // A second copy can't open while this one runs, so a detached shell waits for this
         // process to exit and then opens the new bundle.
         let relaunch = Process()
