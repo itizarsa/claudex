@@ -12,7 +12,7 @@ import Testing
         {
           "accounts": [
             {"id": "a", "provider": "anthropic", "identity": "ann@example.com", "plan": "team", "health": "ready", "enabled": true},
-            {"id": "b", "provider": "openai", "identity": "bob@example.com", "plan": "plus", "health": "ready", "enabled": true}
+            {"id": "b", "provider": "anthropic", "identity": "bob@example.com", "plan": "max", "health": "ready", "enabled": true}
           ],
           "providers": [{"provider": "anthropic", "activeAccountId": "a"}],
           "usage": [
@@ -22,21 +22,19 @@ import Testing
               {"id": "weekly_scoped:opus", "usedPercent": 99}
             ]},
             {"accountId": "b", "observedAt": "2026-10-04T10:00:00Z", "windows": [
-              {"id": "codex:primary", "usedPercent": 12},
-              {"id": "codex:secondary", "usedPercent": 30}
+              {"id": "session", "usedPercent": 12},
+              {"id": "weekly_all", "usedPercent": 30}
             ]}
           ]
         }
         """)
 
         #expect(accounts.map(\.id) == ["a", "b"])
-        #expect(accounts[0].provider == .claude)
         #expect(accounts[0].isActive)
         #expect(accounts[0].plan == "Team")
         #expect(accounts[0].snapshot?.fiveHour.percent == 4)
         #expect(accounts[0].snapshot?.weekly.percent == 82)
         #expect(accounts[0].snapshot?.fiveHour.resetsAt != nil)
-        #expect(accounts[1].provider == .codex)
         #expect(!accounts[1].isActive)
         #expect(accounts[1].snapshot?.fiveHour.percent == 12)
         #expect(accounts[1].snapshot?.weekly.percent == 30)
@@ -66,6 +64,7 @@ import Testing
         {
           "accounts": [
             {"id": "g", "provider": "xai", "identity": "g@example.com"},
+            {"id": "o", "provider": "openai", "identity": "o@example.com"},
             {"id": "d", "provider": "anthropic", "identity": "d@example.com", "enabled": false}
           ],
           "providers": [],

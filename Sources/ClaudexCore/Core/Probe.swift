@@ -6,14 +6,14 @@ public enum Probe {
         do {
             let accounts = try await Tokenmaxx.status()
             guard !accounts.isEmpty else {
-                print("no accounts; run tokenmaxx login claude or tokenmaxx login codex")
+                print("no accounts; run tokenmaxx login claude")
                 return
             }
             for account in accounts {
                 let marker = account.isActive ? "*" : " "
                 let fiveHour = account.snapshot?.fiveHour.percentText ?? "—"
                 let weekly = account.snapshot?.weekly.percentText ?? "—"
-                print("\(marker) \(account.provider.rawValue.padding(toLength: 7, withPad: " ", startingAt: 0)) \(account.email)  5h \(fiveHour)  week \(weekly)  [\(account.plan)] \(account.health)")
+                print("\(marker) \(account.email)  5h \(fiveHour)  week \(weekly)  [\(account.plan)] \(account.health)")
             }
         } catch {
             print("FAILED: \((error as? ClaudexError)?.errorDescription ?? error.localizedDescription)")

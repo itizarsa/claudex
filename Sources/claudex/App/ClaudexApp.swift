@@ -5,8 +5,6 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
     private let state = PanelState(engine: UsageEngine())
-    /// One status item carrying every provider's ring. Each provider has its own active
-    /// account, so each needs its own ring; one item keeps them one click target.
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let popover = NSPopover()
 
@@ -65,29 +63,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate {
         }
     }
 
-    /// Redraws one ring per provider that has an account, each from that provider's active
-    /// account, and resizes the item to suit. Before any account exists a single empty ring is
+    /// Redraws the ring from the active account. Before any account exists an empty ring is
     /// drawn, or the app would have nothing to click.
     private func updateStatusIcon() {
         guard let button = statusItem.button else { return }
 
-        let statusEntries = state.statusEntries
-        let entries = statusEntries.map { entry -> MenuBarIcon.Entry in
-            return MenuBarIcon.Entry(
-                alias: entry.account?.badge ?? "-",
-                fiveHour: entry.account?.snapshot?.fiveHour ?? .unknown
-            )
-        }
-
-        let drawn = entries.isEmpty ? [MenuBarIcon.Entry(alias: "-", fiveHour: .unknown)] : entries
-        statusItem.length = MenuBarIcon.width(forRings: drawn.count)
-        button.image = MenuBarIcon.rings(drawn)
+        let account = state.accounts.first
+        let entry = MenuBarIcon.Entry(
+            alias: account?.badge ?? "-",
+            fiveHour: account?.snapshot?.fiveHour ?? .unknown
+        )
+        statusItem.length = MenuBarIcon.width(forRings: 1)
+        button.image = MenuBarIcon.rings([entry])
         button.imagePosition = .imageOnly
-        button.toolTip = statusEntries.isEmpty
-            ? "Claudex usage"
-            : statusEntries.map { entry in
-                "\(entry.kind.displayName): \(entry.account?.email ?? "no account")"
-            }.joined(separator: "\n")
+        button.toolTip = account.map { "Claude: \($0.email)" } ?? "Claudex usage"
     }
 }
 

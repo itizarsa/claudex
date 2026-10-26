@@ -4,7 +4,6 @@ import Foundation
 /// switching; claudex draws what its daemon reports and asks it to switch.
 public struct UsageAccount: Identifiable, Equatable, Sendable {
     public let id: String
-    public let provider: ProviderKind
     public let email: String
     public let plan: String
     public let isActive: Bool
@@ -40,7 +39,7 @@ public enum Tokenmaxx {
     /// Makes `account` the one tokenmaxx routes its provider's requests through.
     public static func switchTo(_ account: UsageAccount) async throws {
         let params: [String: Any] = [
-            "provider": account.provider.tokenmaxxName,
+            "provider": "anthropic",
             "reason": "manual",
             "targetAccountId": account.id,
         ]
@@ -68,13 +67,13 @@ public enum Tokenmaxx {
         }
 
         return json["accounts"].array.compactMap { account in
+            // tokenmaxx names providers by vendor; only Anthropic's are shown.
             guard account["enabled"].bool != false,
-                  let id = account["id"].string,
-                  let provider = account["provider"].string.flatMap(ProviderKind.init(tokenmaxx:))
+                  account["provider"].string == "anthropic",
+                  let id = account["id"].string
             else { return nil }
             return UsageAccount(
                 id: id,
-                provider: provider,
                 email: account["identity"].string ?? account["label"].string ?? "",
                 plan: (account["plan"].string ?? "").capitalized,
                 isActive: active.contains(id),
@@ -84,11 +83,11 @@ public enum Tokenmaxx {
         }
     }
 
-    /// Claude reports `session` and `weekly_all`; Codex reports `codex:primary` and
-    /// `codex:secondary`. Scoped windows, such as per-model weekly limits, are left out.
+    /// Claude reports `session` and `weekly_all`. Scoped windows, such as per-model weekly
+    /// limits, are left out.
     private static func snapshot(_ windows: [JSONView], observedAt: Date) -> UsageSnapshot {
-        func window(_ ids: Set<String>, seconds: Double) -> UsageWindow {
-            guard let match = windows.first(where: { ids.contains($0["id"].string ?? "") }) else {
+        func window(_ id: String, seconds: Double) -> UsageWindow {
+            guard let match = windows.first(where: { $0["id"].string == id }) else {
                 return .unknown
             }
             return UsageWindow(
@@ -98,8 +97,8 @@ public enum Tokenmaxx {
             )
         }
         return UsageSnapshot(
-            fiveHour: window(["session", "codex:primary"], seconds: 5 * 3600),
-            weekly: window(["weekly_all", "codex:secondary"], seconds: 7 * 24 * 3600),
+            fiveHour: window("session", seconds: 5 * 3600),
+            weekly: window("weekly_all", seconds: 7 * 24 * 3600),
             fetchedAt: observedAt
         )
     }
@@ -166,20 +165,3 @@ public enum Tokenmaxx {
     }
 }
 
-extension ProviderKind {
-    /// tokenmaxx names providers by vendor; Grok and any other provider are not shown.
-    init?(tokenmaxx name: String) {
-        switch name {
-        case "anthropic": self = .claude
-        case "openai": self = .codex
-        default: return nil
-        }
-    }
-
-    var tokenmaxxName: String {
-        switch self {
-        case .claude: return "anthropic"
-        case .codex: return "openai"
-        }
-    }
-}

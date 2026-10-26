@@ -1,38 +1,21 @@
 import ClaudexCore
 import SwiftUI
 
-/// The provider's own mark, drawn from its published logo path rather than shipped as an
-/// asset: the panel needs one glyph at one size, and a vector stays crisp on both scales
-/// without a catalogue to maintain. Both paths are the official marks, normalised to
-/// absolute move/line/curve commands in a 24x24 box.
-struct ProviderMark: View {
-    let kind: ProviderKind
+/// Claude's own mark, drawn from its published logo path rather than shipped as an asset:
+/// the panel needs one glyph at one size, and a vector stays crisp on both scales without a
+/// catalogue to maintain. The path is the official mark, normalised to absolute
+/// move/line/curve commands in a 24x24 box.
+struct ClaudeMark: View {
     var size: CGFloat = 13
 
     var body: some View {
-        LogoShape(commands: kind.markPath)
-            .fill(kind.markColor, style: FillStyle(eoFill: kind == .codex))
+        LogoShape(commands: claudeMarkPath)
+            .fill(Theme.claudeMark)
             .frame(width: size, height: size)
     }
 }
 
-private extension ProviderKind {
-    var markColor: Color {
-        switch self {
-        case .claude: return Theme.claudeMark
-        case .codex: return Theme.codexMark
-        }
-    }
-
-    var markPath: String {
-        switch self {
-        case .claude: return claudeMarkPath
-        case .codex: return openAIMarkPath
-        }
-    }
-}
-
-/// A reader for the one path dialect these two marks are stored in: absolute `M`, `L`, `C`
+/// A reader for the one path dialect the mark is stored in: absolute `M`, `L`, `C`
 /// and `Z` over a 24x24 box, scaled to the frame. Arcs and relative commands were flattened
 /// out when the paths were imported, which keeps this to a dozen lines rather than a full
 /// SVG parser.
@@ -114,33 +97,3 @@ private let claudeMarkPath =
     L 4.721 15.949 Z
     """
 
-private let openAIMarkPath =
-    """
-    M 9.205 8.658 L 9.205 6.398 C 9.205 6.208 9.277 6.065 9.443 5.97 L 13.986 3.354 C
-    14.605 2.997 15.342 2.831 16.103 2.831 C 18.957 2.831 20.765 5.043 20.765 7.397 C
-    20.765 7.564 20.765 7.754 20.741 7.944 L 16.031 5.185 C 15.77 5.019 15.436 5.019
-    15.175 5.185 L 9.205 8.658 Z M 19.814 17.458 L 19.814 12.06 C 19.814 11.727 19.671
-    11.49 19.385 11.323 L 13.415 7.85 L 15.365 6.732 C 15.509 6.637 15.697 6.637 15.841
-    6.732 L 20.384 9.349 C 21.693 10.109 22.573 11.727 22.573 13.297 C 22.573 15.105
-    21.503 16.77 19.813 17.46 Z M 7.802 12.703 L 5.852 11.561 C 5.685 11.466 5.613 11.323
-    5.613 11.133 L 5.613 5.899 C 5.613 3.354 7.563 1.427 10.204 1.427 C 11.204 1.427
-    12.131 1.76 12.916 2.355 L 8.23 5.067 C 7.945 5.233 7.802 5.471 7.802 5.804 L 7.802
-    12.702 Z M 12 15.128 L 9.205 13.558 L 9.205 10.228 L 12 8.658 L 14.795 10.228 L 14.795
-    13.558 L 12 15.128 Z M 13.796 22.358 C 12.796 22.358 11.869 22.026 11.084 21.431 L
-    15.77 18.719 C 16.055 18.553 16.198 18.315 16.198 17.982 L 16.198 11.084 L 18.172
-    12.226 C 18.339 12.321 18.41 12.464 18.41 12.654 L 18.41 17.887 C 18.41 20.432 16.436
-    22.359 13.796 22.359 Z M 8.159 17.055 L 3.615 14.438 C 2.307 13.677 1.427 12.06 1.427
-    10.49 C 1.421 8.665 2.521 7.019 4.21 6.327 L 4.21 11.75 C 4.21 12.083 4.353 12.321
-    4.638 12.488 L 10.585 15.937 L 8.635 17.055 C 8.491 17.15 8.303 17.15 8.159 17.055 Z M
-    7.897 20.955 C 5.209 20.955 3.235 18.934 3.235 16.436 C 3.235 16.246 3.259 16.056
-    3.282 15.866 L 7.968 18.576 C 8.254 18.743 8.539 18.743 8.824 18.576 L 14.794 15.128 L
-    14.794 17.388 C 14.794 17.578 14.724 17.721 14.557 17.816 L 10.014 20.432 C 9.395
-    20.789 8.658 20.955 7.897 20.955 Z M 13.796 23.785 C 16.622 23.785 19.057 21.797
-    19.623 19.029 C 22.287 18.339 24 15.84 24 13.296 C 24 11.631 23.287 10.014 22.002
-    8.848 C 22.121 8.348 22.192 7.849 22.192 7.35 C 22.192 3.949 19.433 1.403 16.246 1.403
-    C 15.604 1.403 14.986 1.498 14.366 1.713 C 13.256 0.62 11.763 0.006 10.205 0 C 7.379
-    -0 4.943 1.988 4.378 4.757 C 1.713 5.447 0 7.945 0 10.49 C 0 12.156 0.713 13.773 1.998
-    14.938 C 1.879 15.438 1.808 15.938 1.808 16.437 C 1.808 19.838 4.567 22.383 7.754
-    22.383 C 8.396 22.383 9.014 22.288 9.634 22.074 C 10.744 23.167 12.238 23.782 13.796
-    23.787 Z
-    """

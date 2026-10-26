@@ -1,17 +1,5 @@
 import Foundation
 
-public enum ProviderKind: String, Codable, CaseIterable, Sendable {
-    case claude
-    case codex
-
-    public var displayName: String {
-        switch self {
-        case .claude: return "Claude"
-        case .codex: return "Codex"
-        }
-    }
-}
-
 /// A single rate-limit window. `percent` is optional on purpose: a window the API did not
 /// report is unknown, never zero. Treating a missing field as 0% would look like plenty of
 /// headroom.

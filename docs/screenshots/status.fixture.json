@@ -17,25 +17,12 @@
    "plan": "team",
    "health": "ready",
    "enabled": true
-  },
-  {
-   "id": "o1",
-   "provider": "openai",
-   "identity": "alex@example.com",
-   "label": "alex@example.com",
-   "plan": "plus",
-   "health": "ready",
-   "enabled": true
   }
  ],
  "providers": [
   {
    "provider": "anthropic",
    "activeAccountId": "c1"
-  },
-  {
-   "provider": "openai",
-   "activeAccountId": "o1"
   }
  ],
  "usage": [
@@ -68,22 +55,6 @@
      "id": "weekly_all",
      "usedPercent": 88,
      "resetAt": "2026-10-05T16:17:10.000Z"
-    }
-   ]
-  },
-  {
-   "accountId": "o1",
-   "observedAt": "2026-10-04T10:17:10.000Z",
-   "windows": [
-    {
-     "id": "codex:primary",
-     "usedPercent": 23,
-     "resetAt": "2026-10-04T13:17:10.000Z"
-    },
-    {
-     "id": "codex:secondary",
-     "usedPercent": 37,
-     "resetAt": "2026-10-09T10:17:10.000Z"
     }
    ]
   }

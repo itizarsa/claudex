@@ -9,9 +9,7 @@ struct UsagePopover: View {
             if state.showingSettings {
                 SettingsPanel(state: state)
             } else {
-                ForEach(ProviderKind.allCases, id: \.self) { kind in
-                    section(kind)
-                }
+                section
             }
 
             if let notice = state.notice {
@@ -34,13 +32,13 @@ struct UsagePopover: View {
 
     // MARK: - Sections
 
-    private func section(_ kind: ProviderKind) -> some View {
-        let accounts = state.accounts(for: kind)
+    private var section: some View {
+        let accounts = state.accounts
 
         return VStack(alignment: .leading, spacing: 7) {
             HStack(spacing: 6) {
-                ProviderMark(kind: kind)
-                Text(kind.displayName.uppercased())
+                ClaudeMark()
+                Text("CLAUDE")
                     .font(Theme.sectionHeader)
                     .tracking(0.6)
                     .foregroundStyle(Theme.secondaryText)
@@ -49,7 +47,7 @@ struct UsagePopover: View {
             .padding(.leading, 2)
 
             if accounts.isEmpty {
-                EmptyProviderCard(kind: kind)
+                EmptyProviderCard()
             } else {
                 VStack(spacing: 6) {
                     ForEach(accounts) { account in
@@ -95,7 +93,7 @@ struct UsagePopover: View {
 /// a multi-account panel scannable: the eye lands on a block, not on a run of hairlines.
 struct AccountCard: View {
     let account: UsageAccount
-    /// False for the only account of a provider, where marking the active one says nothing.
+    /// False for the only account, where marking the active one says nothing.
     let showsActiveMark: Bool
     let isSwitching: Bool
     let onSwitch: () -> Void
@@ -138,7 +136,7 @@ struct AccountCard: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
         .onTapGesture { if isSwitchable { onSwitch() } }
-        .help(isSwitchable ? "Route \(account.provider.displayName) through this account" : "")
+        .help(isSwitchable ? "Route Claude through this account" : "")
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .fill(isSwitchable && hovering ? Theme.cardHover : Theme.card)
@@ -326,12 +324,10 @@ struct SkeletonRow: View {
     }
 }
 
-/// An empty provider is a setup step, not a blank space.
+/// No accounts is a setup step, not a blank space.
 struct EmptyProviderCard: View {
-    let kind: ProviderKind
-
     var body: some View {
-        Text("Run tokenmaxx login \(kind.rawValue) to add an account.")
+        Text("Run tokenmaxx login claude to add an account.")
             .font(Theme.caption)
             .foregroundStyle(Theme.secondaryText)
             .frame(maxWidth: .infinity)

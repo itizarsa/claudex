@@ -1,13 +1,13 @@
 # Claudex
 
 Claudex is a macOS menu bar app that shows the 5-hour and weekly limits of your
-Claude and Codex accounts.
+Claude accounts.
 
 It reads them from [tokenmaxx](https://github.com/RubricLab/tokenmaxx), which owns
 sign-in, credentials and account switching. Claudex displays and asks it to switch.
 
 <p align="center">
-  <img src="docs/screenshots/accounts.png" width="280" alt="Claudex usage panel with mock Claude and Codex accounts">
+  <img src="docs/screenshots/accounts.png" width="280" alt="Claudex usage panel with mock Claude accounts">
 </p>
 
 ## Install
@@ -67,15 +67,15 @@ Do not disable Gatekeeper globally.
 
 ## First setup
 
-1. Add accounts with tokenmaxx: `tokenmaxx login claude`, `tokenmaxx login codex`.
+1. Add accounts with tokenmaxx: `tokenmaxx login claude`.
 2. Open Claudex from Applications. It lives in the menu bar, not the Dock.
 3. Click its menu bar ring to see every account's limits.
 
 ## Features
 
-- Show 5-hour and weekly limits for every tokenmaxx Claude and Codex account.
-- One menu bar ring per provider, for its active account.
-- Use switches a provider to another account.
+- Show 5-hour and weekly limits for every tokenmaxx Claude account.
+- A menu bar ring for the active account.
+- Clicking an account card switches to it.
 - Refresh asks tokenmaxx to re-probe usage; otherwise Claudex re-reads the tokenmaxx
   daemon's snapshot every minute and when the panel opens.
 - Launch at login.
