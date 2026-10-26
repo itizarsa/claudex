@@ -2,7 +2,7 @@
 import PackageDescription
 
 // Three targets so the domain can be tested. An executable target cannot be imported, so
-// everything worth a test — the tokenmaxx status parser and the usage maths — lives in
+// everything worth a test — the CLIProxyAPI parser and the usage maths — lives in
 // `ClaudexCore`; the executable keeps the views, the menu bar item and the argument parsing.
 let package = Package(
     name: "claudex",

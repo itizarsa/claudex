@@ -51,13 +51,7 @@ struct UsagePopover: View {
             } else {
                 VStack(spacing: 6) {
                     ForEach(accounts) { account in
-                        AccountCard(
-                            account: account,
-                            showsActiveMark: accounts.count > 1,
-                            isSwitching: state.engine.switchingAccount == account.id
-                        ) {
-                            state.switchTo(account)
-                        }
+                        AccountCard(account: account, showsActiveMark: accounts.count > 1)
                     }
                 }
                 .animation(Theme.transition, value: accounts.first?.id)
@@ -93,13 +87,8 @@ struct UsagePopover: View {
 /// a multi-account panel scannable: the eye lands on a block, not on a run of hairlines.
 struct AccountCard: View {
     let account: UsageAccount
-    /// False for the only account, where marking the active one says nothing.
+    /// False for the only account, where marking the last-served one says nothing.
     let showsActiveMark: Bool
-    let isSwitching: Bool
-    let onSwitch: () -> Void
-    @State private var hovering = false
-
-    private var isSwitchable: Bool { showsActiveMark && !account.isActive && !isSwitching }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -125,7 +114,7 @@ struct AccountCard: View {
             }
 
             if account.health != "ready" {
-                Text("tokenmaxx reports this account as \(account.health).")
+                Text("CLIProxyAPI reports this account as \(account.health).")
                     .font(Theme.caption)
                     .foregroundStyle(Theme.secondaryText)
                     .fixedSize(horizontal: false, vertical: true)
@@ -134,18 +123,15 @@ struct AccountCard: View {
         .padding(.horizontal, Theme.cardPaddingH)
         .padding(.vertical, Theme.cardPaddingV)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .contentShape(Rectangle())
-        .onTapGesture { if isSwitchable { onSwitch() } }
-        .help(isSwitchable ? "Route Claude through this account" : "")
         .background(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
-                .fill(isSwitchable && hovering ? Theme.cardHover : Theme.card)
+                .fill(Theme.card)
         )
         .overlay(
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(Theme.cardStroke, lineWidth: Theme.cardStrokeWidth)
         )
-        // The active account is marked at the card's edge: a rail reads as a property of the
+        // The last-served account is marked at the card's edge: a rail reads as a property of the
         // whole card.
         .overlay(alignment: .leading) {
             if showsActiveMark && account.isActive {
@@ -155,47 +141,19 @@ struct AccountCard: View {
             }
         }
         .clipShape(RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous))
-        .opacity(isSwitching ? 0.62 : 1)
-        .onHover { hovering = $0 }
-        .animation(Theme.transition, value: hovering)
-        .animation(Theme.transition, value: isSwitching)
         .animation(Theme.transition, value: account)
     }
 
     private var header: some View {
         HStack(spacing: 8) {
             AliasBadge(text: account.badge, filled: account.isActive)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(account.email)
-                    .font(Theme.accountName)
-                    .foregroundStyle(Theme.primaryText)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Text(account.plan)
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.tertiaryText)
-                    .lineLimit(1)
-            }
+            Text(account.email)
+                .font(Theme.accountName)
+                .foregroundStyle(Theme.primaryText)
+                .lineLimit(1)
+                .truncationMode(.middle)
             Spacer(minLength: 4)
-            if isSwitching {
-                Tag(text: "Switching…")
-            } else if isSwitchable && hovering {
-                Tag(text: "Switch")
-            }
         }
-    }
-}
-
-struct Tag: View {
-    let text: String
-
-    var body: some View {
-        Text(text)
-            .font(Theme.activeTag)
-            .foregroundStyle(Theme.accent)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(Theme.accent.opacity(0.12)))
     }
 }
 
@@ -327,7 +285,7 @@ struct SkeletonRow: View {
 /// No accounts is a setup step, not a blank space.
 struct EmptyProviderCard: View {
     var body: some View {
-        Text("Run tokenmaxx login claude to add an account.")
+        Text("Run cliproxyapi -claude-login to add an account.")
             .font(Theme.caption)
             .foregroundStyle(Theme.secondaryText)
             .frame(maxWidth: .infinity)

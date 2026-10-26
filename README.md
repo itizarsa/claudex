@@ -3,8 +3,8 @@
 Claudex is a macOS menu bar app that shows the 5-hour and weekly limits of your
 Claude accounts.
 
-It reads them from [tokenmaxx](https://github.com/RubricLab/tokenmaxx), which owns
-sign-in, credentials and account switching. Claudex displays and asks it to switch.
+It reads them from [CLIProxyAPI](https://github.com/router-for-me/CLIProxyAPI), which owns
+sign-in, credentials and account rotation. Claudex only displays.
 
 <p align="center">
   <img src="docs/screenshots/accounts.png" width="280" alt="Claudex usage panel with mock Claude accounts">
@@ -12,12 +12,16 @@ sign-in, credentials and account switching. Claudex displays and asks it to swit
 
 ## Install
 
-Requires Apple silicon, macOS 14 Sonoma or newer, and tokenmaxx with its daemon running:
+Requires Apple silicon, macOS 14 Sonoma or newer, and CLIProxyAPI running on
+`http://127.0.0.1:8317` with its management API enabled:
 
 ```sh
-bun add -g tokenmaxx
-tokenmaxx daemon install
+brew install cliproxyapi
+brew services start cliproxyapi
 ```
+
+Claudex reads the management key from `CLIPROXY_MGMT` in `~/.cli-proxy-api-secrets.env`.
+Set `CLIPROXY_URL` to point it at another address.
 
 ### Homebrew
 
@@ -67,17 +71,17 @@ Do not disable Gatekeeper globally.
 
 ## First setup
 
-1. Add accounts with tokenmaxx: `tokenmaxx login claude`.
+1. Add accounts to CLIProxyAPI: `cliproxyapi -claude-login`.
 2. Open Claudex from Applications. It lives in the menu bar, not the Dock.
 3. Click its menu bar ring to see every account's limits.
 
 ## Features
 
-- Show 5-hour and weekly limits for every tokenmaxx Claude account.
-- A menu bar ring for the active account.
-- Clicking an account card switches to it.
-- Refresh asks tokenmaxx to re-probe usage; otherwise Claudex re-reads the tokenmaxx
-  daemon's snapshot every minute and when the panel opens.
+- Show 5-hour and weekly limits for every enabled CLIProxyAPI Claude account.
+- A menu bar ring for the account CLIProxyAPI served most recently.
+- Every minute and when the panel opens, Claudex re-reads the rate-limit headers
+  CLIProxyAPI last saw, which costs no provider requests. At launch and on Refresh it asks
+  Anthropic for each account's usage through CLIProxyAPI, so idle accounts show too.
 - Launch at login.
 
 ## Build from source
@@ -113,8 +117,8 @@ ad-hoc otherwise.
 
 | Flag | Effect |
 | --- | --- |
-| `--list` | Print every account and its limits as Claudex parsed them from the tokenmaxx daemon. |
-| `--panelshot <path> [fixture]` | Render the panel to a PNG, optionally from a saved `tokenmaxx status` JSON. |
+| `--list` | Print every account and its limits as Claudex parsed them from CLIProxyAPI. |
+| `--panelshot <path> [fixture]` | Render the panel to a PNG, optionally from a saved `/v0/management/auth-files` JSON. |
 
 Regenerate the README screenshot from mock accounts:
 
@@ -124,5 +128,6 @@ swift run claudex --panelshot docs/screenshots/accounts.png docs/screenshots/sta
 
 ## Data
 
-Claudex stores nothing of its own and never touches credentials. Everything comes from
-the tokenmaxx daemon's socket, `~/.tokenmaxx/runtime/manager.sock`.
+Claudex stores nothing of its own and never touches account credentials. Everything comes
+from CLIProxyAPI's management API; usage probes go through its `api-call` proxy, which
+fills in each account's token itself.

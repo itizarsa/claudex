@@ -10,10 +10,8 @@ enum Theme {
     // Surfaces. The tint sits on top of the material rather than replacing it, so the panel
     // reads as system chrome. `VisualEffectBackground` supplies the material underneath.
     static let popoverTint = Color.black.opacity(0.25)
-    /// Cards are outlined, not filled. The fill appears only under the pointer, which is the
-    /// one moment a card needs to separate itself from its neighbours.
+    /// Cards are outlined, not filled.
     static let card = Color.clear
-    static let cardHover = Color.primary.opacity(0.05)
     static let cardStroke = Color.primary.opacity(0.1)
     static let hairline = Color.primary.opacity(0.1)
     /// Sampled from the reference: its unfilled track is #383636 against a #212020 card. Ours
@@ -71,7 +69,6 @@ enum Theme {
     static let pill = Font.system(size: 9, weight: .medium)
     /// The organisation beside an account's name. A step under the name it qualifies.
     static let chip = Font.system(size: 8, weight: .semibold)
-    static let activeTag = Font.system(size: 8, weight: .semibold)
 }
 
 /// The popover's backdrop: a HUD vibrancy layer with a flat tint over it. The tint is what

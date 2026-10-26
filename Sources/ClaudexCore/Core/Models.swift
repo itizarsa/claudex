@@ -45,13 +45,13 @@ public struct UsageSnapshot: Codable, Equatable, Sendable {
 
 public enum ClaudexError: LocalizedError {
     case decoding(String)
-    case tokenmaxx(String)
+    case cliproxy(String)
 
     public var errorDescription: String? {
         switch self {
         case .decoding(let detail):
-            return "Unexpected tokenmaxx output: \(detail)"
-        case .tokenmaxx(let message):
+            return "Unexpected CLIProxyAPI output: \(detail)"
+        case .cliproxy(let message):
             return message
         }
     }

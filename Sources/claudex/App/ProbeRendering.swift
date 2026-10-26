@@ -23,14 +23,14 @@ extension Probe {
     }
 
     /// Renders the panel itself to a PNG, so its layout can be looked at without opening it.
-    /// Draws the real view against tokenmaxx's real status, which is the only way the image and the app
-    /// cannot disagree.
+    /// Draws the real view against CLIProxyAPI's real accounts, which is the only way the image
+    /// and the app cannot disagree.
     @MainActor
-    /// A fixture, a saved `tokenmaxx status` output, renders mock accounts for documentation.
+    /// A fixture, a saved `auth-files` response, renders mock accounts for documentation.
     static func renderPanel(path: String, fixture: String? = nil) {
         if let fixture {
             do {
-                let accounts = try Tokenmaxx.parse(Data(contentsOf: URL(fileURLWithPath: fixture)))
+                let accounts = try CLIProxy.parse(Data(contentsOf: URL(fileURLWithPath: fixture)))
                 return renderPanel(path: path, state: PanelState(engine: UsageEngine(accounts: accounts)))
             } catch {
                 print("fixture failed: \(error.localizedDescription)")
@@ -42,7 +42,7 @@ extension Probe {
         let semaphore = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var accounts: [UsageAccount] = []
         Task.detached {
-            accounts = (try? await Tokenmaxx.status()) ?? []
+            accounts = (try? await CLIProxy.status(probe: true)) ?? []
             semaphore.signal()
         }
         semaphore.wait()

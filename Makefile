@@ -83,7 +83,7 @@ uninstall:
 	rm -rf /Applications/$(APP).app
 	@echo "removed /Applications/$(APP).app"
 	@echo "turn off Launch at login before uninstalling, or clear it in System Settings > General > Login Items"
-	@echo "tokenmaxx accounts and credentials are untouched"
+	@echo "CLIProxyAPI accounts and credentials are untouched"
 
 run: bundle
 	pkill -x claudex 2>/dev/null || true

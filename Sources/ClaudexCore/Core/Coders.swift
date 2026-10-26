@@ -23,7 +23,7 @@ enum ISO8601 {
     }
 }
 
-/// Lenient reader over decoded JSON. tokenmaxx's status output is not a documented contract,
+/// Lenient reader over decoded JSON. CLIProxyAPI's management output is not a documented contract,
 /// so every lookup is allowed to miss and the caller decides what a miss means.
 struct JSONView {
     let raw: Any?

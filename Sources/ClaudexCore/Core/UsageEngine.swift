@@ -2,17 +2,18 @@ import AppKit
 import Foundation
 import Observation
 
-/// Reads the tokenmaxx daemon's snapshot on a timer and on wake. The daemon answers from its
-/// local store, so polling it often costs no provider requests.
+/// Reads CLIProxyAPI's accounts on a timer and on wake. The hub answers from the rate-limit
+/// headers it already saw, so polling it often costs no provider requests.
 @MainActor
 @Observable
 public final class UsageEngine {
     public private(set) var accounts: [UsageAccount] = []
     public private(set) var lastError: String?
     public private(set) var isLoading = false
-    public private(set) var switchingAccount: String?
-    /// Set when a load is asked for mid-load, so a switch's result isn't lost to an older read.
+    /// Set when a load is asked for mid-load, so a refresh's result isn't lost to an older read.
     private var reloadPending = false
+    /// Likewise for a probe, so a refresh asked for mid-load still reaches Anthropic.
+    private var probePending = false
 
     private var timer: Timer?
     private var wakeObserver: NSObjectProtocol?
@@ -39,7 +40,8 @@ public final class UsageEngine {
             Task { @MainActor in await self?.load() }
         }
 
-        Task { await load() }
+        // Idle accounts have no passive reading until something is asked of Anthropic.
+        refresh()
     }
 
     public func stop() {
@@ -51,46 +53,41 @@ public final class UsageEngine {
         }
     }
 
-    /// Has tokenmaxx re-probe every account, then reads the result.
+    /// Asks Anthropic for every account's usage through the hub.
     public func refresh() {
-        Task {
-            do {
-                try await Tokenmaxx.refresh()
-            } catch {
-                lastError = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
-            }
-            await load()
-        }
+        Task { await load(probe: true) }
     }
 
-    /// Has tokenmaxx route `account`'s provider through it, then reads the result.
-    public func switchTo(_ account: UsageAccount) {
-        guard switchingAccount == nil else { return }
-        switchingAccount = account.id
-        Task {
-            defer { switchingAccount = nil }
-            do {
-                try await Tokenmaxx.switchTo(account)
-            } catch {
-                lastError = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
-            }
-            await load()
-        }
-    }
-
-    public func load() async {
+    public func load(probe: Bool = false) async {
+        probePending = probePending || probe
         guard !isLoading else { reloadPending = true; return }
         isLoading = true
         defer { isLoading = false }
         repeat {
             reloadPending = false
+            let probe = probePending
+            probePending = false
             do {
-                accounts = try await Tokenmaxx.status()
+                merge(try await CLIProxy.status(probe: probe))
                 lastError = nil
             } catch {
                 // Keep the last accounts on screen; a stale reading beats an empty panel.
                 lastError = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
             }
         } while reloadPending
+    }
+
+    /// A probed reading outlives the passive reads that follow it until the hub sees newer
+    /// headers for that account.
+    private func merge(_ fresh: [UsageAccount]) {
+        let previous = Dictionary(accounts.map { ($0.id, $0.snapshot) }, uniquingKeysWith: { a, _ in a })
+        accounts = fresh.map { account in
+            var account = account
+            if let kept = previous[account.id] ?? nil,
+               kept.fetchedAt > account.snapshot?.fetchedAt ?? .distantPast {
+                account.snapshot = kept
+            }
+            return account
+        }
     }
 }
