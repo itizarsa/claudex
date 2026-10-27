@@ -10,6 +10,8 @@ public final class UsageEngine {
     public private(set) var accounts: [UsageAccount] = []
     public private(set) var lastError: String?
     public private(set) var isLoading = false
+    /// True from a Refresh click until its quota fetch lands, so the button can show it.
+    public private(set) var isRefreshing = false
     /// Set when a load is asked for mid-load, so a refresh's result isn't lost to an older read.
     private var reloadPending = false
     /// Likewise for a quota fetch, so a refresh asked for mid-load still fetches.
@@ -55,6 +57,7 @@ public final class UsageEngine {
 
     /// Has the hub fetch every account's quota now.
     public func refresh() {
+        isRefreshing = true
         Task { await load(fetch: true) }
     }
 
@@ -62,7 +65,7 @@ public final class UsageEngine {
         fetchPending = fetchPending || fetch
         guard !isLoading else { reloadPending = true; return }
         isLoading = true
-        defer { isLoading = false }
+        defer { isLoading = false; isRefreshing = false }
         repeat {
             reloadPending = false
             let fetch = fetchPending

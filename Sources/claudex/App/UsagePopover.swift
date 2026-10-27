@@ -63,7 +63,7 @@ struct UsagePopover: View {
         VStack(spacing: 6) {
             Divider().overlay(Theme.hairline)
             HStack(spacing: 0) {
-                TextButton(title: "Refresh") {
+                TextButton(title: state.engine.isRefreshing ? "Refreshing…" : "Refresh", isBusy: state.engine.isRefreshing) {
                     state.refresh()
                 }
                 Spacer()
@@ -335,22 +335,30 @@ struct IconButton: View {
 
 struct TextButton: View {
     let title: String
+    /// Shows a spinner and ignores clicks while the action's work runs.
+    var isBusy = false
     let action: () -> Void
     @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Text(title)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundStyle(hovering ? Theme.primaryText : Theme.secondaryText)
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
-                .background(
-                    RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
-                        .fill(Color.primary.opacity(hovering ? 0.08 : 0))
-                )
+            HStack(spacing: 5) {
+                if isBusy {
+                    ProgressView().controlSize(.mini)
+                }
+                Text(title)
+            }
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(hovering ? Theme.primaryText : Theme.secondaryText)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(
+                RoundedRectangle(cornerRadius: Theme.controlRadius, style: .continuous)
+                    .fill(Color.primary.opacity(hovering ? 0.08 : 0))
+            )
         }
         .buttonStyle(PressableButtonStyle())
+        .disabled(isBusy)
         .onHover { hovering = $0 }
         .animation(Theme.transition, value: hovering)
     }
