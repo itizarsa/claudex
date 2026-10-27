@@ -8,22 +8,24 @@ import AppKit
 final class UpdateRelauncher {
     private let bundleURL = Bundle.main.bundleURL
     private let runningBuild = Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String
-    private var source: DispatchSourceFileSystemObject?
+    private var sources: [DispatchSourceFileSystemObject] = []
 
-    /// Watches the folder holding the bundle. An upgrade removes the old bundle and moves the new
-    /// one in, and both are writes to that folder, so nothing runs until something there changes.
+    /// Watches the bundle and the folder holding it. Homebrew 7 keeps the bundle and swaps its
+    /// `Contents`, a write to the bundle; a fresh install replaces the bundle, a write to the
+    /// folder. Nothing runs until one of them changes.
     func start() {
         guard runningBuild != nil else { return }
-        let fd = open(bundleURL.deletingLastPathComponent().path, O_EVTONLY)
-        guard fd >= 0 else { return }
-
-        let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
-        source.setEventHandler { [weak self] in
-            MainActor.assumeIsolated { self?.check() }
+        for url in [bundleURL, bundleURL.deletingLastPathComponent()] {
+            let fd = open(url.path, O_EVTONLY)
+            guard fd >= 0 else { continue }
+            let source = DispatchSource.makeFileSystemObjectSource(fileDescriptor: fd, eventMask: .write, queue: .main)
+            source.setEventHandler { [weak self] in
+                MainActor.assumeIsolated { self?.check() }
+            }
+            source.setCancelHandler { close(fd) }
+            source.resume()
+            sources.append(source)
         }
-        source.setCancelHandler { close(fd) }
-        source.resume()
-        self.source = source
     }
 
     private func check() {
@@ -34,7 +36,7 @@ final class UpdateRelauncher {
               build != runningBuild
         else { return }
 
-        source?.cancel()
+        sources.forEach { $0.cancel() }
         // A second copy can't open while this one runs, so a detached shell waits for this
         // process to exit and then opens the new bundle.
         let relaunch = Process()
