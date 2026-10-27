@@ -5,6 +5,8 @@ import Foundation
 public struct UsageAccount: Identifiable, Equatable, Sendable {
     /// The auth file's name, which the management API keys accounts by.
     public let id: String
+    /// The hub's handle for the account, which quota fetches name it by.
+    public let authIndex: String
     public let email: String
     /// "Personal" or "Team", from the account's organisation. Empty when unknown.
     public var plan: String = ""
@@ -42,10 +44,20 @@ public enum CLIProxy {
     }
 
     /// Lists the hub's Claude accounts with the rate-limit headers it last saw for each. Those
-    /// readings are passive, so reading them costs no provider requests; an account the hub
-    /// hasn't served since its window reset shows its last reading.
-    public static func status() async throws -> [UsageAccount] {
-        try parse(try await request("GET", "auth-files"))
+    /// readings are passive, so reading them costs no provider requests. With `fetch`, the hub
+    /// also fetches each account's quota now, through its quota provider (the reset-first
+    /// plugin), which is the only reading an idle account has.
+    public static func status(fetch: Bool = false) async throws -> [UsageAccount] {
+        var accounts = try parse(try await request("GET", "auth-files"))
+        guard fetch else { return accounts }
+        for index in accounts.indices {
+            let body: [String: Any] = ["auth_index": accounts[index].authIndex]
+            if let response = try? await request("POST", "quota/fetch", body: body) {
+                accounts[index].snapshot = parseQuota(response)
+            }
+        }
+        markActive(&accounts)
+        return accounts
     }
 
     /// Parses a saved `GET /v0/management/auth-files` response.
@@ -59,13 +71,14 @@ public enum CLIProxy {
             $0["provider"].string == "claude" && $0["disabled"].bool != true
         }
         var accounts: [UsageAccount] = files.compactMap { file in
-            guard let name = file["name"].string else { return nil }
+            guard let name = file["name"].string, let authIndex = file["auth_index"].string else { return nil }
             let status = file["status"].string ?? "active"
             let ready = status == "active" && file["unavailable"].bool != true
             let message = file["status_message"].string ?? ""
             let email = file["email"].string ?? file["label"].string ?? name
             return UsageAccount(
                 id: name,
+                authIndex: authIndex,
                 email: email,
                 plan: plan(organization: organization(file["path"].string), email: email),
                 health: ready ? "ready" : (message.isEmpty ? status : message),
@@ -74,6 +87,23 @@ public enum CLIProxy {
         }
         markActive(&accounts)
         return accounts
+    }
+
+    /// Parses `POST /v0/management/quota/fetch`: buckets "5h" and "7d", each with the fraction
+    /// left and an ISO reset time.
+    static func parseQuota(_ json: JSONView, fetchedAt: Date = Date()) -> UsageSnapshot {
+        let buckets = json["groups"].array.flatMap { $0["buckets"].array }
+        func window(_ name: String, seconds: Double) -> UsageWindow {
+            guard let bucket = buckets.first(where: { $0["window"].string == name }),
+                  let remaining = bucket["remainingFraction"].double
+            else { return .unknown }
+            return UsageWindow(percent: (1 - remaining) * 100, resetsAt: bucket["resetTime"].date, windowSeconds: seconds)
+        }
+        return UsageSnapshot(
+            fiveHour: window("5h", seconds: 5 * 3600),
+            weekly: window("7d", seconds: 7 * 24 * 3600),
+            fetchedAt: fetchedAt
+        )
     }
 
     /// Marks the account the reset-first scheduler plugin (itizarsa/cliproxy-reset-first) picks:

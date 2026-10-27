@@ -81,9 +81,10 @@ Do not disable Gatekeeper globally.
 - A menu bar ring for the account the [reset-first](https://github.com/itizarsa/cliproxy-reset-first)
   plugin routes to next: the soonest weekly reset among usable accounts.
 - Whether each account belongs to a Personal or a Team organisation.
-- Every minute, when the panel opens and on Refresh, Claudex re-reads the rate-limit
-  headers CLIProxyAPI last saw. It never calls Anthropic, so an account CLIProxyAPI hasn't
-  served lately shows its last reading.
+- Every minute and when the panel opens, Claudex re-reads the rate-limit headers
+  CLIProxyAPI last saw, which costs no provider requests. At launch and on Refresh it asks
+  CLIProxyAPI to fetch each account's quota (`POST /v0/management/quota/fetch`), so idle
+  accounts show too. That needs a quota provider for Claude; the reset-first plugin is one.
 - Launch at login.
 
 ## Build from source
@@ -130,7 +131,7 @@ swift run claudex --panelshot docs/screenshots/accounts.png docs/screenshots/sta
 
 ## Data
 
-Claudex stores nothing of its own and makes no provider requests. Accounts and usage come
-from CLIProxyAPI's management API. The one exception is each account's organisation name,
+Claudex stores nothing of its own and never calls a provider. Accounts and usage come from
+CLIProxyAPI's management API. The one exception is each account's organisation name,
 which the API doesn't list: Claudex reads `organization_name` from the account's auth file
 and nothing else from it.

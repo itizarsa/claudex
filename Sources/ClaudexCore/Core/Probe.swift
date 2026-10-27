@@ -4,7 +4,7 @@ public enum Probe {
     /// Prints what claudex parsed from CLIProxyAPI.
     public static func list() async {
         do {
-            let accounts = try await CLIProxy.status()
+            let accounts = try await CLIProxy.status(fetch: true)
             guard !accounts.isEmpty else {
                 print("no accounts; run cliproxyapi -claude-login")
                 return

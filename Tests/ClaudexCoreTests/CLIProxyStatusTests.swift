@@ -61,12 +61,24 @@ import Testing
         #expect(CLIProxy.plan(organization: nil, email: "ann@example.com") == "")
     }
 
+    @Test func parsesFetchedQuota() throws {
+        let json = try JSONView.parse(Data("""
+        {"groups": [{"displayName": "Claude", "buckets": [
+          {"window": "5h", "remainingFraction": 0.75, "resetTime": "2026-10-27T09:40:00Z"},
+          {"window": "7d", "remainingFraction": 0}]}]}
+        """.utf8))
+        let snapshot = CLIProxy.parseQuota(json)
+        #expect(snapshot.fiveHour.percent == 25)
+        #expect(snapshot.fiveHour.resetsAt != nil)
+        #expect(snapshot.weekly.percent == 100)
+    }
+
     @Test func marksSoonestWeeklyResetAmongUsableAccounts() {
         let now = Date(timeIntervalSince1970: 1_000_000)
         func account(_ id: String, week: Double?, resetIn: Double, fiveHour: Double = 10, health: String = "ready") -> UsageAccount {
             let weekly = week.map { UsageWindow(percent: $0, resetsAt: now + resetIn, windowSeconds: nil) } ?? .unknown
             return UsageAccount(
-                id: id, email: id, health: health,
+                id: id, authIndex: id, email: id, health: health,
                 snapshot: UsageSnapshot(
                     fiveHour: UsageWindow(percent: fiveHour, resetsAt: now + 3600, windowSeconds: nil),
                     weekly: weekly, fetchedAt: now))

@@ -12,6 +12,8 @@ public final class UsageEngine {
     public private(set) var isLoading = false
     /// Set when a load is asked for mid-load, so a refresh's result isn't lost to an older read.
     private var reloadPending = false
+    /// Likewise for a quota fetch, so a refresh asked for mid-load still fetches.
+    private var fetchPending = false
 
     private var timer: Timer?
     private var wakeObserver: NSObjectProtocol?
@@ -38,6 +40,7 @@ public final class UsageEngine {
             Task { @MainActor in await self?.load() }
         }
 
+        // Idle accounts have no passive reading until their quota is fetched.
         refresh()
     }
 
@@ -50,23 +53,43 @@ public final class UsageEngine {
         }
     }
 
+    /// Has the hub fetch every account's quota now.
     public func refresh() {
-        Task { await load() }
+        Task { await load(fetch: true) }
     }
 
-    public func load() async {
+    public func load(fetch: Bool = false) async {
+        fetchPending = fetchPending || fetch
         guard !isLoading else { reloadPending = true; return }
         isLoading = true
         defer { isLoading = false }
         repeat {
             reloadPending = false
+            let fetch = fetchPending
+            fetchPending = false
             do {
-                accounts = try await CLIProxy.status()
+                merge(try await CLIProxy.status(fetch: fetch))
                 lastError = nil
             } catch {
                 // Keep the last accounts on screen; a stale reading beats an empty panel.
                 lastError = (error as? ClaudexError)?.errorDescription ?? error.localizedDescription
             }
         } while reloadPending
+    }
+
+    /// A fetched reading outlives the passive reads that follow it until the hub sees newer
+    /// headers for that account.
+    private func merge(_ fresh: [UsageAccount]) {
+        let previous = Dictionary(accounts.map { ($0.id, $0.snapshot) }, uniquingKeysWith: { a, _ in a })
+        accounts = fresh.map { account in
+            var account = account
+            if let kept = previous[account.id] ?? nil,
+               kept.fetchedAt > account.snapshot?.fetchedAt ?? .distantPast {
+                account.snapshot = kept
+            }
+            return account
+        }
+        // A kept reading can change which account the plugin ranks first.
+        CLIProxy.markActive(&accounts)
     }
 }
