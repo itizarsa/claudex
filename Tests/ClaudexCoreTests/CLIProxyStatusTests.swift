@@ -55,8 +55,8 @@ import Testing
         #expect(throws: ClaudexError.self) { try parse("{}") }
     }
 
-    @Test func personalOrganisationIsProOthersTeam() {
-        #expect(CLIProxy.plan(organization: "Ann@Example.com's Organization", email: "ann@example.com") == "Pro")
+    @Test func personalOrganisationIsPersonalOthersTeam() {
+        #expect(CLIProxy.plan(organization: "Ann@Example.com's Organization", email: "ann@example.com") == "Personal")
         #expect(CLIProxy.plan(organization: "Superfans", email: "ann@example.com") == "Team")
         #expect(CLIProxy.plan(organization: nil, email: "ann@example.com") == "")
     }

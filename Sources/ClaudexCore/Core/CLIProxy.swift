@@ -6,7 +6,7 @@ public struct UsageAccount: Identifiable, Equatable, Sendable {
     /// The auth file's name, which the management API keys accounts by.
     public let id: String
     public let email: String
-    /// "Team" or "Pro", from the account's organisation. Empty when unknown.
+    /// "Personal" or "Team", from the account's organisation. Empty when unknown.
     public var plan: String = ""
     /// The account the reset-first plugin sends the next request to. See `markActive`.
     public var isActive = false
@@ -114,10 +114,9 @@ public enum CLIProxy {
     }
 
     /// Anthropic names a personal organisation "<email>'s Organization"; any other is a team.
-    /// A personal one may be Pro or Max, which only Anthropic can tell apart; Pro is assumed.
     static func plan(organization: String?, email: String) -> String {
         guard let organization, !organization.isEmpty else { return "" }
-        return organization.lowercased().hasPrefix(email.lowercased()) ? "Pro" : "Team"
+        return organization.lowercased().hasPrefix(email.lowercased()) ? "Personal" : "Team"
     }
 
     /// The `anthropic-ratelimit-unified-*` headers from the account's last response: utilization
