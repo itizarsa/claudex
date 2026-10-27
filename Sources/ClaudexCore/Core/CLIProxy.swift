@@ -74,7 +74,7 @@ public enum CLIProxy {
             guard let name = file["name"].string, let authIndex = file["auth_index"].string else { return nil }
             let status = file["status"].string ?? "active"
             let ready = status == "active" && file["unavailable"].bool != true
-            let message = file["status_message"].string ?? ""
+            let message = health(file)
             let email = file["email"].string ?? file["label"].string ?? name
             return UsageAccount(
                 id: name,
@@ -87,6 +87,21 @@ public enum CLIProxy {
         }
         markActive(&accounts)
         return accounts
+    }
+
+    /// Why the hub isn't routing through the account, in words. A quota cooldown is the usual
+    /// case; otherwise `status_message` is often the provider's raw error body, whose own
+    /// message is the readable part.
+    private static func health(_ file: JSONView) -> String {
+        if file["cooldowns"].array.contains(where: { ($0["reason"].string ?? "").contains("quota") }) {
+            return "rate limited"
+        }
+        let message = file["status_message"].string ?? ""
+        if let data = message.data(using: .utf8), let body = try? JSONView.parse(data),
+           let text = body["error"]["message"].string {
+            return text
+        }
+        return message
     }
 
     /// Parses `POST /v0/management/quota/fetch`: buckets "5h" and "7d", each with the fraction

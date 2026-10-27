@@ -51,6 +51,20 @@ import Testing
         #expect(!accounts[0].isActive)
     }
 
+    @Test func quotaCooldownReadsAsRateLimited() throws {
+        let accounts = try parse(#"""
+        {"files": [
+          {"name": "a.json", "auth_index": "1", "provider": "claude", "email": "a@example.com", "status": "error",
+           "unavailable": true, "status_message": "{\"type\":\"error\"}",
+           "cooldowns": [{"scope": "credential", "reason": "credential_quota"}]},
+          {"name": "b.json", "auth_index": "2", "provider": "claude", "email": "b@example.com", "status": "error",
+           "status_message": "{\"type\":\"error\",\"error\":{\"message\":\"Overloaded\"}}"}
+        ]}
+        """#)
+        #expect(accounts[0].health == "rate limited")
+        #expect(accounts[1].health == "Overloaded")
+    }
+
     @Test func rejectsOutputWithoutFiles() {
         #expect(throws: ClaudexError.self) { try parse("{}") }
     }
