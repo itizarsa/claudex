@@ -112,13 +112,6 @@ struct AccountCard: View {
                     .font(Theme.caption)
                     .foregroundStyle(Theme.secondaryText)
             }
-
-            if account.health != "ready" {
-                Text("CLIProxyAPI reports this account as \(account.health).")
-                    .font(Theme.caption)
-                    .foregroundStyle(Theme.secondaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
         }
         .padding(.horizontal, Theme.cardPaddingH)
         .padding(.vertical, Theme.cardPaddingV)
@@ -161,7 +154,31 @@ struct AccountCard: View {
                 }
             }
             Spacer(minLength: 4)
+            switch account.status {
+            case .ready:
+                EmptyView()
+            case .exhausted:
+                StatusPill(text: "Exhausted", tone: Color(nsColor: .usageRed))
+            case .unavailable(let reason):
+                StatusPill(text: "Unavailable", tone: .yellow)
+                    .help("CLIProxyAPI reports: \(reason)")
+            }
         }
+    }
+}
+
+/// A word on the card's top edge for an account the hub can't route through right now.
+struct StatusPill: View {
+    let text: String
+    let tone: Color
+
+    var body: some View {
+        Text(text)
+            .font(Theme.pill)
+            .foregroundStyle(tone)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(tone.opacity(0.15)))
     }
 }
 

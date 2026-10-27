@@ -18,6 +18,23 @@ public struct UsageAccount: Identifiable, Equatable, Sendable {
 
     /// Two letters for the menu bar ring.
     public var badge: String { String(email.prefix(2)).uppercased() }
+
+    public enum Status: Equatable, Sendable {
+        case ready
+        /// Out of quota in a window: the hub has cooled it, or a reading is at 100%.
+        case exhausted
+        /// The hub won't route through it for another reason, given in its words.
+        case unavailable(String)
+    }
+
+    public var status: Status {
+        if health == "rate limited" { return .exhausted }
+        let windows = [snapshot?.fiveHour, snapshot?.weekly].compactMap { $0 }
+        if windows.contains(where: { ($0.percent ?? 0) >= 100 && ($0.resetsAt ?? .distantFuture) > Date() }) {
+            return .exhausted
+        }
+        return health == "ready" ? .ready : .unavailable(health)
+    }
 }
 
 public enum CLIProxy {

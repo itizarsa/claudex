@@ -61,8 +61,8 @@ import Testing
            "status_message": "{\"type\":\"error\",\"error\":{\"message\":\"Overloaded\"}}"}
         ]}
         """#)
-        #expect(accounts[0].health == "rate limited")
-        #expect(accounts[1].health == "Overloaded")
+        #expect(accounts[0].status == .exhausted)
+        #expect(accounts[1].status == .unavailable("Overloaded"))
     }
 
     @Test func rejectsOutputWithoutFiles() {
