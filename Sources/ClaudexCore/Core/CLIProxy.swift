@@ -5,12 +5,11 @@ import Foundation
 public struct UsageAccount: Identifiable, Equatable, Sendable {
     /// The auth file's name, which the management API keys accounts by.
     public let id: String
-    /// The hub's handle for the account's token, used to probe usage on its behalf.
-    public let authIndex: String
     public let email: String
-    /// The account the hub served most recently. The hub rotates accounts itself, so this is
-    /// where traffic last went, not a pinned choice.
-    public let isActive: Bool
+    /// "Team" or "Pro", from the account's organisation. Empty when unknown.
+    public var plan: String = ""
+    /// The account the reset-first plugin sends the next request to. See `markActive`.
+    public var isActive = false
     /// "ready" when the hub can route through the account, otherwise its own status word.
     public let health: String
     public var snapshot: UsageSnapshot?
@@ -43,15 +42,10 @@ public enum CLIProxy {
     }
 
     /// Lists the hub's Claude accounts with the rate-limit headers it last saw for each. Those
-    /// readings are passive, so reading them costs no provider requests. With `probe`, every
-    /// account's usage is also asked of Anthropic, which is the only reading an idle account has.
-    public static func status(probe: Bool = false) async throws -> [UsageAccount] {
-        var accounts = try parse(try await request("GET", "auth-files"))
-        guard probe else { return accounts }
-        for index in accounts.indices {
-            if let reading = try? await usage(accounts[index]) { accounts[index].snapshot = reading }
-        }
-        return accounts
+    /// readings are passive, so reading them costs no provider requests; an account the hub
+    /// hasn't served since its window reset shows its last reading.
+    public static func status() async throws -> [UsageAccount] {
+        try parse(try await request("GET", "auth-files"))
     }
 
     /// Parses a saved `GET /v0/management/auth-files` response.
@@ -64,24 +58,66 @@ public enum CLIProxy {
         let files = json["files"].array.filter {
             $0["provider"].string == "claude" && $0["disabled"].bool != true
         }
-        let lastServed = files
-            .compactMap { file in file["quota"]["observed_at"].date.map { (file["name"].string, $0) } }
-            .max { $0.1 < $1.1 }?.0
-
-        return files.compactMap { file in
-            guard let name = file["name"].string, let authIndex = file["auth_index"].string else { return nil }
+        var accounts: [UsageAccount] = files.compactMap { file in
+            guard let name = file["name"].string else { return nil }
             let status = file["status"].string ?? "active"
             let ready = status == "active" && file["unavailable"].bool != true
             let message = file["status_message"].string ?? ""
+            let email = file["email"].string ?? file["label"].string ?? name
             return UsageAccount(
                 id: name,
-                authIndex: authIndex,
-                email: file["email"].string ?? file["label"].string ?? name,
-                isActive: name == lastServed,
+                email: email,
+                plan: plan(organization: organization(file["path"].string), email: email),
                 health: ready ? "ready" : (message.isEmpty ? status : message),
                 snapshot: snapshot(file["quota"])
             )
         }
+        markActive(&accounts)
+        return accounts
+    }
+
+    /// Marks the account the reset-first scheduler plugin (itizarsa/cliproxy-reset-first) picks:
+    /// among those the hub can route through now, the soonest weekly reset wins, since quota
+    /// left at a reset is lost. Accounts at `spent` weekly use rank after the rest, accounts with
+    /// no weekly reading after those, and ties go by id.
+    public static func markActive(_ accounts: inout [UsageAccount], spent: Double = 98, now: Date = Date()) {
+        func key(_ account: UsageAccount) -> Double? {
+            guard account.health == "ready" else { return nil }
+            // The hub cools an account at its 5-hour limit, so it isn't offered to the plugin.
+            let fiveHour = account.snapshot?.fiveHour
+            let capped = (fiveHour?.percent ?? 0) >= 100
+            if capped, let reset = fiveHour?.resetsAt, reset > now { return nil }
+            guard let weekly = account.snapshot?.weekly,
+                  let percent = weekly.percent,
+                  let reset = weekly.resetsAt,
+                  reset > now
+            else { return Double.infinity }
+            if percent >= spent { return Double.greatestFiniteMagnitude }
+            return reset.timeIntervalSince1970
+        }
+        var pick: (id: String, key: Double)?
+        for account in accounts {
+            guard let key = key(account) else { continue }
+            if let best = pick, best.key < key || (best.key == key && best.id < account.id) { continue }
+            pick = (account.id, key)
+        }
+        for index in accounts.indices {
+            accounts[index].isActive = accounts[index].id == pick?.id
+        }
+    }
+
+    /// The `organization_name` in the hub's auth file for the account. The management API
+    /// doesn't list it, so the file is read; only this field is taken from it.
+    private static func organization(_ path: String?) -> String? {
+        guard let path, let data = FileManager.default.contents(atPath: path) else { return nil }
+        return (try? JSONView.parse(data))?["organization_name"].string
+    }
+
+    /// Anthropic names a personal organisation "<email>'s Organization"; any other is a team.
+    /// A personal one may be Pro or Max, which only Anthropic can tell apart; Pro is assumed.
+    static func plan(organization: String?, email: String) -> String {
+        guard let organization, !organization.isEmpty else { return "" }
+        return organization.lowercased().hasPrefix(email.lowercased()) ? "Pro" : "Team"
     }
 
     /// The `anthropic-ratelimit-unified-*` headers from the account's last response: utilization
@@ -104,36 +140,6 @@ public enum CLIProxy {
             fiveHour: window("5h", seconds: 5 * 3600),
             weekly: window("7d", seconds: 7 * 24 * 3600),
             fetchedAt: observedAt
-        )
-    }
-
-    /// Asks Anthropic's usage endpoint through the hub's `api-call` proxy, which substitutes the
-    /// account's token for `$TOKEN$` so claudex never holds it.
-    private static func usage(_ account: UsageAccount) async throws -> UsageSnapshot {
-        let body: [String: Any] = [
-            "auth_index": account.authIndex,
-            "method": "GET",
-            "url": "https://api.anthropic.com/api/oauth/usage",
-            "header": ["Authorization": "Bearer $TOKEN$", "anthropic-beta": "oauth-2025-04-20"],
-        ]
-        let response = try await request("POST", "api-call", body: body)
-        guard response["status_code"].int == 200, let text = response["body"].string else {
-            throw ClaudexError.cliproxy("usage probe for \(account.email) failed")
-        }
-        return try parseUsage(Data(text.utf8))
-    }
-
-    /// Parses Anthropic's `/api/oauth/usage` body, whose utilization is already a percentage.
-    static func parseUsage(_ data: Data, fetchedAt: Date = Date()) throws -> UsageSnapshot {
-        let json = try JSONView.parse(data)
-        func window(_ key: String, seconds: Double) -> UsageWindow {
-            guard let percent = json[key]["utilization"].double else { return .unknown }
-            return UsageWindow(percent: percent, resetsAt: json[key]["resets_at"].date, windowSeconds: seconds)
-        }
-        return UsageSnapshot(
-            fiveHour: window("five_hour", seconds: 5 * 3600),
-            weekly: window("seven_day", seconds: 7 * 24 * 3600),
-            fetchedAt: fetchedAt
         )
     }
 

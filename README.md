@@ -78,10 +78,12 @@ Do not disable Gatekeeper globally.
 ## Features
 
 - Show 5-hour and weekly limits for every enabled CLIProxyAPI Claude account.
-- A menu bar ring for the account CLIProxyAPI served most recently.
-- Every minute and when the panel opens, Claudex re-reads the rate-limit headers
-  CLIProxyAPI last saw, which costs no provider requests. At launch and on Refresh it asks
-  Anthropic for each account's usage through CLIProxyAPI, so idle accounts show too.
+- A menu bar ring for the account the [reset-first](https://github.com/itizarsa/cliproxy-reset-first)
+  plugin routes to next: the soonest weekly reset among usable accounts.
+- Each account's plan: Pro for a personal organisation, Team for any other.
+- Every minute, when the panel opens and on Refresh, Claudex re-reads the rate-limit
+  headers CLIProxyAPI last saw. It never calls Anthropic, so an account CLIProxyAPI hasn't
+  served lately shows its last reading.
 - Launch at login.
 
 ## Build from source
@@ -128,6 +130,7 @@ swift run claudex --panelshot docs/screenshots/accounts.png docs/screenshots/sta
 
 ## Data
 
-Claudex stores nothing of its own and never touches account credentials. Everything comes
-from CLIProxyAPI's management API; usage probes go through its `api-call` proxy, which
-fills in each account's token itself.
+Claudex stores nothing of its own and makes no provider requests. Accounts and usage come
+from CLIProxyAPI's management API. The one exception is each account's organisation name,
+which the API doesn't list: Claudex reads `organization_name` from the account's auth file
+and nothing else from it.

@@ -7,7 +7,7 @@ import Testing
         try CLIProxy.parse(Data(json.utf8))
     }
 
-    @Test func mapsAccountsWindowsAndLastServed() throws {
+    @Test func mapsAccountsAndWindows() throws {
         let accounts = try parse("""
         {"files": [
           {"name": "a.json", "auth_index": "1", "provider": "claude", "email": "ann@example.com", "status": "active",
@@ -21,13 +21,10 @@ import Testing
         """)
 
         #expect(accounts.map(\.id) == ["a.json", "b.json"])
-        #expect(accounts[0].authIndex == "1")
-        #expect(accounts[0].isActive)
         #expect(accounts[0].health == "ready")
         #expect(accounts[0].snapshot?.fiveHour.percent == 4)
         #expect(accounts[0].snapshot?.weekly.percent == 82)
         #expect(accounts[0].snapshot?.fiveHour.resetsAt == Date(timeIntervalSince1970: 1793048400))
-        #expect(!accounts[1].isActive)
         #expect(accounts[1].snapshot?.fiveHour.percent == 12)
         #expect(accounts[1].snapshot?.weekly == .unknown)
     }
@@ -58,15 +55,32 @@ import Testing
         #expect(throws: ClaudexError.self) { try parse("{}") }
     }
 
-    @Test func parsesProbedUsage() throws {
-        let snapshot = try CLIProxy.parseUsage(Data("""
-        {"five_hour": {"utilization": 10.0, "resets_at": "2026-10-26T21:00:00.055871+00:00"},
-         "seven_day": {"utilization": 12.0, "resets_at": "2026-10-31T17:00:00+00:00"},
-         "seven_day_opus": null}
-        """.utf8))
-        #expect(snapshot.fiveHour.percent == 10)
-        #expect(snapshot.weekly.percent == 12)
-        #expect(snapshot.fiveHour.resetsAt != nil)
-        #expect(snapshot.weekly.resetsAt != nil)
+    @Test func personalOrganisationIsProOthersTeam() {
+        #expect(CLIProxy.plan(organization: "Ann@Example.com's Organization", email: "ann@example.com") == "Pro")
+        #expect(CLIProxy.plan(organization: "Superfans", email: "ann@example.com") == "Team")
+        #expect(CLIProxy.plan(organization: nil, email: "ann@example.com") == "")
+    }
+
+    @Test func marksSoonestWeeklyResetAmongUsableAccounts() {
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        func account(_ id: String, week: Double?, resetIn: Double, fiveHour: Double = 10, health: String = "ready") -> UsageAccount {
+            let weekly = week.map { UsageWindow(percent: $0, resetsAt: now + resetIn, windowSeconds: nil) } ?? .unknown
+            return UsageAccount(
+                id: id, email: id, health: health,
+                snapshot: UsageSnapshot(
+                    fiveHour: UsageWindow(percent: fiveHour, resetsAt: now + 3600, windowSeconds: nil),
+                    weekly: weekly, fetchedAt: now))
+        }
+        func active(_ accounts: [UsageAccount]) -> String? {
+            var accounts = accounts
+            CLIProxy.markActive(&accounts, now: now)
+            return accounts.first(where: \.isActive)?.id
+        }
+
+        #expect(active([account("late", week: 20, resetIn: 9000), account("soon", week: 50, resetIn: 100)]) == "soon")
+        #expect(active([account("spent", week: 99, resetIn: 100), account("late", week: 20, resetIn: 9000)]) == "late")
+        #expect(active([account("capped", week: 50, resetIn: 100, fiveHour: 100), account("late", week: 20, resetIn: 9000)]) == "late")
+        #expect(active([account("down", week: 50, resetIn: 100, health: "expired"), account("unknown", week: nil, resetIn: 0)]) == "unknown")
+        #expect(active([account("down", week: 50, resetIn: 100, health: "expired")]) == nil)
     }
 }

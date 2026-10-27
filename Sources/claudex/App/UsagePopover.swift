@@ -87,7 +87,7 @@ struct UsagePopover: View {
 /// a multi-account panel scannable: the eye lands on a block, not on a run of hairlines.
 struct AccountCard: View {
     let account: UsageAccount
-    /// False for the only account, where marking the last-served one says nothing.
+    /// False for the only account, where marking the reset-first one says nothing.
     let showsActiveMark: Bool
 
     var body: some View {
@@ -131,7 +131,7 @@ struct AccountCard: View {
             RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
                 .strokeBorder(Theme.cardStroke, lineWidth: Theme.cardStrokeWidth)
         )
-        // The last-served account is marked at the card's edge: a rail reads as a property of the
+        // The reset-first account is marked at the card's edge: a rail reads as a property of the
         // whole card.
         .overlay(alignment: .leading) {
             if showsActiveMark && account.isActive {
@@ -147,11 +147,19 @@ struct AccountCard: View {
     private var header: some View {
         HStack(spacing: 8) {
             AliasBadge(text: account.badge, filled: account.isActive)
-            Text(account.email)
-                .font(Theme.accountName)
-                .foregroundStyle(Theme.primaryText)
-                .lineLimit(1)
-                .truncationMode(.middle)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(account.email)
+                    .font(Theme.accountName)
+                    .foregroundStyle(Theme.primaryText)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                if !account.plan.isEmpty {
+                    Text(account.plan)
+                        .font(Theme.caption)
+                        .foregroundStyle(Theme.tertiaryText)
+                        .lineLimit(1)
+                }
+            }
             Spacer(minLength: 4)
         }
     }

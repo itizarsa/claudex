@@ -42,7 +42,7 @@ extension Probe {
         let semaphore = DispatchSemaphore(value: 0)
         nonisolated(unsafe) var accounts: [UsageAccount] = []
         Task.detached {
-            accounts = (try? await CLIProxy.status(probe: true)) ?? []
+            accounts = (try? await CLIProxy.status()) ?? []
             semaphore.signal()
         }
         semaphore.wait()
