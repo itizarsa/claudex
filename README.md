@@ -78,7 +78,7 @@ Do not disable Gatekeeper globally.
 ## Features
 
 - Show 5-hour and weekly limits for every enabled CLIProxyAPI Claude account.
-- A menu bar ring for the account the [reset-first](https://github.com/itizarsa/cliproxy-reset-first)
+- A menu bar ring for the account the [reset-first](https://github.com/itizarsa/cliproxy-plugin)
   plugin routes to next: the soonest weekly reset among usable accounts.
 - Whether each account belongs to a Personal or a Team organisation.
 - Every minute and when the panel opens, Claudex re-reads the rate-limit headers

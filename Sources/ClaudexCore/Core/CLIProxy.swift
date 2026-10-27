@@ -106,7 +106,7 @@ public enum CLIProxy {
         )
     }
 
-    /// Marks the account the reset-first scheduler plugin (itizarsa/cliproxy-reset-first) picks:
+    /// Marks the account the reset-first scheduler plugin (itizarsa/cliproxy-plugin) picks:
     /// among those the hub can route through now, the soonest weekly reset wins, since quota
     /// left at a reset is lost. Accounts at `spent` weekly use rank after the rest, accounts with
     /// no weekly reading after those, and ties go by id.
