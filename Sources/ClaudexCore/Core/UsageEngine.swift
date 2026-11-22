@@ -3,7 +3,9 @@ import Foundation
 import Observation
 
 /// Reads CLIProxyAPI's accounts on a timer and on wake. The hub answers from the rate-limit
-/// headers it already saw, so polling it often costs no provider requests.
+/// headers it already saw, so polling it often costs no provider requests. Those headers only
+/// move when traffic goes through the hub, so every few ticks the timer also has the hub fetch
+/// each account's quota, or an idle account's reading would stay at the last Refresh.
 @MainActor
 @Observable
 public final class UsageEngine {
@@ -20,6 +22,9 @@ public final class UsageEngine {
     private var timer: Timer?
     private var wakeObserver: NSObjectProtocol?
     private let interval: TimeInterval = 60
+    /// Timer ticks between quota fetches: one fetch per account every 5 minutes.
+    private let fetchEvery = 5
+    private var ticks = 0
 
     /// Accounts can be seeded so a render probe can draw without starting the timer.
     public init(accounts: [UsageAccount] = []) {
@@ -28,8 +33,9 @@ public final class UsageEngine {
 
     public func start() {
         stop()
+        ticks = 0
         let timer = Timer(timeInterval: interval, repeats: true) { [weak self] _ in
-            Task { @MainActor in await self?.load() }
+            Task { @MainActor in await self?.tick() }
         }
         RunLoop.main.add(timer, forMode: .common)
         self.timer = timer
@@ -53,6 +59,11 @@ public final class UsageEngine {
             NotificationCenter.default.removeObserver(wakeObserver)
             self.wakeObserver = nil
         }
+    }
+
+    private func tick() async {
+        ticks += 1
+        await load(fetch: ticks % fetchEvery == 0)
     }
 
     /// Has the hub fetch every account's quota now.
